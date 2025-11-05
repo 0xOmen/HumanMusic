@@ -277,8 +277,8 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     uint256 public constant MIN_UPVOTES_THRESHOLD = 3;
     uint256 public constant REVIEWER_TOKEN_REQUIREMENT = 1000 * 10 ** 18; // 1000 $HUMANMUSIC to become reviewer
 
-    uint256[] public futureQueue; // Queue of approved recommendations
-    uint256[] public pastHistory; // History of played recommendations
+    uint256[] public songQueue; // Queue of all approved recommendations
+    uint256 public currentSongIndex = 0; // Index of currently playing song in songQueue
 
     // ============ EVENTS ============
 
@@ -546,7 +546,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
 
         rec.state = RecommendationState.FUTURE;
         rec.scheduledTime = block.timestamp; // Will be properly scheduled when added to queue
-        futureQueue.push(_recommendationId);
+        songQueue.push(_recommendationId);
 
         emit RecommendationTransitioned(_recommendationId, RecommendationState.FUTURE);
     }
@@ -621,15 +621,10 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
      */
     function initializeStream() external onlyOwner {
         require(currentlyPlayingId == 0, "Stream already initialized");
-        require(futureQueue.length >= 1, "Need at least one approved song in future queue");
+        require(songQueue.length >= 1, "Need at least one approved song in queue");
 
-        uint256 firstSongId = futureQueue[0];
-
-        // Remove from future queue
-        for (uint256 i = 0; i < futureQueue.length - 1; i++) {
-            futureQueue[i] = futureQueue[i + 1];
-        }
-        futureQueue.pop();
+        currentSongIndex = 0;
+        uint256 firstSongId = songQueue[0];
 
         // Set as currently playing
         Recommendation storage firstSong = recommendations[firstSongId];
@@ -653,43 +648,42 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         uint256 timeElapsed = block.timestamp - streamStartTime;
         uint256 currentSongDuration = recommendations[currentlyPlayingId].duration;
         uint256 songsProcessed = 0;
-        uint256 totalTimeToFill = timeElapsed;
+        uint256 totalTimeToFill = 0;
 
         // If current song has finished, move it to past and start processing
         if (timeElapsed >= currentSongDuration) {
             _moveCurrentToPast();
-            totalTimeToFill -= currentSongDuration;
+            totalTimeToFill = timeElapsed - currentSongDuration;
             songsProcessed++;
+            currentSongIndex++;
+        } else {
+            // Current song is still playing, no processing needed
+            return;
         }
 
-        // Keep processing future songs until we've filled the time gap
-        while (totalTimeToFill > 0 && (futureQueue.length > 0 || pastHistory.length > 0)) {
-            if (futureQueue.length == 0) {
-                // Need to perform Big Bang - move all past to future
+        // Iterate through songQueue from currentSongIndex until time gap is filled
+        while (totalTimeToFill > 0) {
+            // Check if we need to perform Big Bang (reached end of queue)
+            if (currentSongIndex >= songQueue.length) {
                 _bigBang();
-                if (futureQueue.length == 0) {
-                    break; // No songs at all, can't continue
-                }
             }
 
-            // Move next song from future to present/past
-            uint256 nextSongId = futureQueue[0];
+            // Ensure we have songs to process
+            if (currentSongIndex >= songQueue.length) {
+                break; // No songs available even after Big Bang
+            }
+
+            uint256 nextSongId = songQueue[currentSongIndex];
             Recommendation storage nextSong = recommendations[nextSongId];
-
-            // Remove from future queue
-            for (uint256 i = 0; i < futureQueue.length - 1; i++) {
-                futureQueue[i] = futureQueue[i + 1];
-            }
-            futureQueue.pop();
 
             if (totalTimeToFill >= nextSong.duration) {
                 // This song would have finished in the time gap
                 nextSong.state = RecommendationState.PAST;
-                pastHistory.push(nextSongId);
                 _rewardUser(nextSong.submitterFid, PLAY_REWARD, "song_played");
                 nextSong.rewardsPaid += PLAY_REWARD;
                 totalTimeToFill -= nextSong.duration;
                 songsProcessed++;
+                currentSongIndex++;
                 emit RecommendationTransitioned(nextSongId, RecommendationState.PAST);
             } else {
                 // This song is currently playing
@@ -699,6 +693,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
                 totalTimeToFill = 0;
                 songsProcessed++;
                 emit RecommendationTransitioned(nextSongId, RecommendationState.PRESENT);
+                break;
             }
         }
 
@@ -711,25 +706,25 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @dev Big Bang - move all past songs back to future when we run out
+     * @dev Big Bang - reset the queue index to restart the cycle
      */
     function _bigBang() internal {
-        require(futureQueue.length == 0, "Can only big bang when future is empty");
-        require(pastHistory.length > 0, "No songs to move from past");
+        require(currentSongIndex >= songQueue.length, "Can only big bang when queue is exhausted");
+        require(songQueue.length > 0, "No songs in queue");
 
-        // Move all past songs to future
-        for (uint256 i = 0; i < pastHistory.length; i++) {
-            uint256 songId = pastHistory[i];
-            recommendations[songId].state = RecommendationState.FUTURE;
-            futureQueue.push(songId);
-            emit RecommendationTransitioned(songId, RecommendationState.FUTURE);
+        // Change all PAST songs back to FUTURE state
+        for (uint256 i = 0; i < songQueue.length; i++) {
+            uint256 songId = songQueue[i];
+            if (recommendations[songId].state == RecommendationState.PAST) {
+                recommendations[songId].state = RecommendationState.FUTURE;
+                emit RecommendationTransitioned(songId, RecommendationState.FUTURE);
+            }
         }
 
+        // Reset index to start of queue
+        currentSongIndex = 0;
         totalCycleCount++;
-        uint256 songsMovedCount = pastHistory.length;
-
-        // Clear past history
-        delete pastHistory;
+        uint256 songsMovedCount = songQueue.length;
 
         emit BigBangExecuted(totalCycleCount, songsMovedCount);
     }
@@ -741,7 +736,6 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         if (currentlyPlayingId != 0) {
             Recommendation storage current = recommendations[currentlyPlayingId];
             current.state = RecommendationState.PAST;
-            pastHistory.push(currentlyPlayingId);
 
             // Reward submitter for their song being played
             _rewardUser(current.submitterFid, PLAY_REWARD, "song_played");
@@ -832,17 +826,17 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @dev Get future queue
+     * @dev Get the song queue
      */
-    function getFutureQueue() external view returns (uint256[] memory) {
-        return futureQueue;
+    function getSongQueue() external view returns (uint256[] memory) {
+        return songQueue;
     }
 
     /**
-     * @dev Get past history
+     * @dev Get the current song index
      */
-    function getPastHistory() external view returns (uint256[] memory) {
-        return pastHistory;
+    function getCurrentSongIndex() external view returns (uint256) {
+        return currentSongIndex;
     }
 
     /**
@@ -909,8 +903,8 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         )
     {
         totalRecommendations = nextRecommendationId - 1;
-        currentQueueLength = futureQueue.length;
-        totalPlayedSongs = pastHistory.length;
+        currentQueueLength = songQueue.length;
+        totalPlayedSongs = currentSongIndex;
 
         // Note: activeUsers would need more sophisticated tracking in production
         activeUsers = 0; // Placeholder
@@ -998,20 +992,20 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         returns (bool canInitialize, uint256 approvedSongsCount, string memory reason)
     {
         if (currentlyPlayingId != 0) {
-            return (false, futureQueue.length, "Stream already initialized");
+            return (false, songQueue.length, "Stream already initialized");
         }
 
-        if (futureQueue.length == 0) {
-            return (false, 0, "No approved songs in future queue");
+        if (songQueue.length == 0) {
+            return (false, 0, "No approved songs in queue");
         }
 
         // Check if at least the first song has duration set
-        uint256 firstSongId = futureQueue[0];
+        uint256 firstSongId = songQueue[0];
         if (recommendations[firstSongId].duration == 0) {
-            return (false, futureQueue.length, "First song duration not set");
+            return (false, songQueue.length, "First song duration not set");
         }
 
-        return (true, futureQueue.length, "Ready to initialize");
+        return (true, songQueue.length, "Ready to initialize");
     }
 
     /**
@@ -1078,17 +1072,17 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
             timeGapToFill = 0;
         }
 
-        // Calculate available duration in future queue
-        for (uint256 i = 0; i < futureQueue.length; i++) {
-            availableFutureDuration += recommendations[futureQueue[i]].duration;
+        // Calculate available duration from current position to end of queue
+        for (uint256 i = currentSongIndex; i < songQueue.length; i++) {
+            availableFutureDuration += recommendations[songQueue[i]].duration;
         }
 
-        // Calculate available duration in past history
-        for (uint256 i = 0; i < pastHistory.length; i++) {
-            availablePastDuration += recommendations[pastHistory[i]].duration;
+        // Calculate available duration for songs that have already played (will cycle back)
+        for (uint256 i = 0; i < currentSongIndex; i++) {
+            availablePastDuration += recommendations[songQueue[i]].duration;
         }
 
-        needsBigBang = (futureQueue.length == 0 && timeGapToFill > 0);
+        needsBigBang = (currentSongIndex >= songQueue.length && timeGapToFill > 0);
     }
 
     /**
@@ -1111,28 +1105,28 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         timeToFill = timeElapsed - currentSongDuration;
         songsToProcess = 1; // Current song moving to past
 
-        // Simulate processing future queue
+        // Simulate processing from currentSongIndex
         uint256 tempTimeToFill = timeToFill;
-        uint256 futureIndex = 0;
+        uint256 simulatedIndex = currentSongIndex + 1; // Start from next song
 
-        while (tempTimeToFill > 0 && (futureIndex < futureQueue.length || pastHistory.length > 0)) {
-            if (futureIndex >= futureQueue.length) {
-                willTriggerBigBang = true;
-                break;
-            }
-
-            uint256 nextSongId = futureQueue[futureIndex];
+        while (tempTimeToFill > 0 && simulatedIndex < songQueue.length) {
+            uint256 nextSongId = songQueue[simulatedIndex];
             uint256 nextDuration = recommendations[nextSongId].duration;
 
             if (tempTimeToFill >= nextDuration) {
                 tempTimeToFill -= nextDuration;
                 songsToProcess++;
-                futureIndex++;
+                simulatedIndex++;
             } else {
                 newCurrentSongId = nextSongId;
                 songsToProcess++;
                 break;
             }
+        }
+
+        // Check if Big Bang would be triggered
+        if (tempTimeToFill > 0 && simulatedIndex >= songQueue.length) {
+            willTriggerBigBang = true;
         }
     }
 }
