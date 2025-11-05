@@ -215,9 +215,10 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
 
     enum RecommendationState {
         SUBMITTED, // Just submitted, awaiting review
-        FUTURE, // Approved and queued for future play
-        PRESENT, // Currently playing
-        PAST // Has finished playing
+        APPROVED, // Approved and added to queue
+        FUTURE, // Computed: queued for future play (index > currentSongIndex)
+        PRESENT, // Computed: currently playing (index == currentSongIndex)
+        PAST // Computed: has finished playing (index < currentSongIndex)
 
     }
 
@@ -544,11 +545,11 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         Recommendation storage rec = recommendations[_recommendationId];
         require(rec.state == RecommendationState.SUBMITTED, "Already processed");
 
-        rec.state = RecommendationState.FUTURE;
+        rec.state = RecommendationState.APPROVED;
         rec.scheduledTime = block.timestamp; // Will be properly scheduled when added to queue
         songQueue.push(_recommendationId);
 
-        emit RecommendationTransitioned(_recommendationId, RecommendationState.FUTURE);
+        emit RecommendationTransitioned(_recommendationId, RecommendationState.APPROVED);
     }
 
     /**
@@ -629,13 +630,12 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         // Set as currently playing
         Recommendation storage firstSong = recommendations[firstSongId];
         require(firstSong.duration > 0, "First song must have duration set");
-        firstSong.state = RecommendationState.PRESENT;
         currentlyPlayingId = firstSongId;
         streamStartTime = block.timestamp;
         lastUpdateTime = block.timestamp;
 
         emit StreamInitialized(firstSongId, streamStartTime);
-        emit RecommendationTransitioned(firstSongId, RecommendationState.PRESENT);
+        emit RecommendationTransitioned(firstSongId, getRecommendationState(firstSongId));
     }
 
     /**
@@ -678,21 +678,19 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
 
             if (totalTimeToFill >= nextSong.duration) {
                 // This song would have finished in the time gap
-                nextSong.state = RecommendationState.PAST;
                 _rewardUser(nextSong.submitterFid, PLAY_REWARD, "song_played");
                 nextSong.rewardsPaid += PLAY_REWARD;
                 totalTimeToFill -= nextSong.duration;
                 songsProcessed++;
                 currentSongIndex++;
-                emit RecommendationTransitioned(nextSongId, RecommendationState.PAST);
+                emit RecommendationTransitioned(nextSongId, getRecommendationState(nextSongId));
             } else {
                 // This song is currently playing
-                nextSong.state = RecommendationState.PRESENT;
                 currentlyPlayingId = nextSongId;
                 streamStartTime = block.timestamp - totalTimeToFill;
                 totalTimeToFill = 0;
                 songsProcessed++;
-                emit RecommendationTransitioned(nextSongId, RecommendationState.PRESENT);
+                emit RecommendationTransitioned(nextSongId, getRecommendationState(nextSongId));
                 break;
             }
         }
@@ -712,16 +710,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         require(currentSongIndex >= songQueue.length, "Can only big bang when queue is exhausted");
         require(songQueue.length > 0, "No songs in queue");
 
-        // Change all PAST songs back to FUTURE state
-        for (uint256 i = 0; i < songQueue.length; i++) {
-            uint256 songId = songQueue[i];
-            if (recommendations[songId].state == RecommendationState.PAST) {
-                recommendations[songId].state = RecommendationState.FUTURE;
-                emit RecommendationTransitioned(songId, RecommendationState.FUTURE);
-            }
-        }
-
-        // Reset index to start of queue
+        // Reset index to start of queue (states are computed dynamically, no need to update)
         currentSongIndex = 0;
         totalCycleCount++;
         uint256 songsMovedCount = songQueue.length;
@@ -735,13 +724,12 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     function _moveCurrentToPast() internal {
         if (currentlyPlayingId != 0) {
             Recommendation storage current = recommendations[currentlyPlayingId];
-            current.state = RecommendationState.PAST;
 
             // Reward submitter for their song being played
             _rewardUser(current.submitterFid, PLAY_REWARD, "song_played");
             current.rewardsPaid += PLAY_REWARD;
 
-            emit RecommendationTransitioned(currentlyPlayingId, RecommendationState.PAST);
+            emit RecommendationTransitioned(currentlyPlayingId, getRecommendationState(currentlyPlayingId));
             currentlyPlayingId = 0;
         }
     }
@@ -837,6 +825,44 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
      */
     function getCurrentSongIndex() external view returns (uint256) {
         return currentSongIndex;
+    }
+
+    /**
+     * @dev Get the computed state of a recommendation based on its position in the queue
+     * @param _recommendationId The recommendation ID
+     * @return The computed RecommendationState (SUBMITTED if stored, PAST/PRESENT/FUTURE if computed from queue position)
+     */
+    function getRecommendationState(uint256 _recommendationId) public view returns (RecommendationState) {
+        Recommendation storage rec = recommendations[_recommendationId];
+
+        // Return SUBMITTED state directly (not in queue yet)
+        if (rec.state == RecommendationState.SUBMITTED) {
+            return RecommendationState.SUBMITTED;
+        }
+
+        // For all other states (APPROVED, or legacy FUTURE/PAST/PRESENT), compute based on queue position
+        // Find the index of this recommendation in the queue
+        uint256 queueIndex = type(uint256).max; // Use max as sentinel value
+        for (uint256 i = 0; i < songQueue.length; i++) {
+            if (songQueue[i] == _recommendationId) {
+                queueIndex = i;
+                break;
+            }
+        }
+
+        // If not found in queue, return stored state (shouldn't happen for approved songs)
+        if (queueIndex == type(uint256).max) {
+            return rec.state;
+        }
+
+        // Compute state based on position relative to currentSongIndex
+        if (queueIndex < currentSongIndex) {
+            return RecommendationState.PAST;
+        } else if (queueIndex == currentSongIndex) {
+            return RecommendationState.PRESENT;
+        } else {
+            return RecommendationState.FUTURE;
+        }
     }
 
     /**
