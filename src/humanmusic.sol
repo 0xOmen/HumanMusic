@@ -296,6 +296,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     event UserAddressAdded(uint256 indexed fid, address indexed registeredAddress);
     event StreamTransitioned(uint256 indexed fromId, uint256 indexed toId);
     event TokensRewarded(uint256 indexed fid, uint256 amount, string reason);
+    event TokensDeposited(uint256 indexed fid, uint256 amount);
     event TokensWithdrawn(uint256 indexed fid, uint256 amount);
     event SystemUpdated(uint256 indexed callerFid, uint256 timeGapFilled, uint256 songsProcessed);
     event BigBangExecuted(uint256 cycleCount, uint256 songsMovedToFuture);
@@ -314,6 +315,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     modifier onlyReviewer(uint256 _fid) {
         require(users[_fid].isReviewer, "Not authorized reviewer");
         require(userAddressValid[_fid][msg.sender], "Sender addr not registered to FID");
+        require(users[_fid].tokenBalance >= REVIEWER_TOKEN_REQUIREMENT, "Insufficient tokens");
         _;
     }
 
@@ -531,7 +533,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @dev Approve a recommendation for the future queue
+     * @dev Approve a recommendation for the future queue without requiring vote
      */
     function approveRecommendation(uint256 _recommendationId, uint256 _reviewerFid)
         external
@@ -578,6 +580,16 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         user.tokensEarned += _amount;
         user.tokenBalance += _amount;
         emit TokensRewarded(_fid, _amount, _reason);
+    }
+
+    /**
+     * @dev External function so user can deposit $HUMANMUSIC tokens for rolls
+     */
+    function userDepositTokens(uint256 _fid, uint256 _amount) external nonReentrant {
+        User storage user = users[_fid];
+        user.tokenBalance += _amount;
+        emit TokensDeposited(_fid, _amount);
+        require(humanMusicToken.transferFrom(msg.sender, address(this), _amount), "Token transfer failed");
     }
 
     /**
@@ -768,6 +780,14 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
      * @dev Grant reviewer privileges (requires token holding)
      */
     function grantReviewerRole(uint256 _fid) external onlyOwner {
+        require(users[_fid].fid != 0, "User not registered");
+        users[_fid].isReviewer = true;
+    }
+
+    /**
+     * @dev Grant reviewer privileges (requires token holding)
+     */
+    function autoGrantReviewerRole(uint256 _fid) external {
         require(users[_fid].fid != 0, "User not registered");
         require(users[_fid].reputationScore >= 200, "Insufficient reputation");
         require(users[_fid].tokenBalance >= REVIEWER_TOKEN_REQUIREMENT, "Insufficient tokens");

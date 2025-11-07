@@ -11,7 +11,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 contract HumanMusicToken is ERC20 {
     constructor() ERC20("HumanMusic", "HUMANMUSIC") {
         // Mint initial supply to deployer (1 billion tokens)
-        _mint(msg.sender, 1_000_000_000 * 10 ** decimals());
+        _mint(msg.sender, 100_000_000_000 * 10 ** decimals());
     }
 
     /**

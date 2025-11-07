@@ -46,6 +46,11 @@ contract UnitTests is Test {
     event RecommendationSubmitted(
         uint256 indexed id, uint256 indexed submitterFid, string youtubeVideoId, string castHash, string country
     );
+    event VoteCast(uint256 indexed recommendationId, uint256 indexed voterFid, bool isUpvote);
+    event RecommendationApproved(uint256 indexed id, uint256 approvedBy);
+    event RecommendationRejected(uint256 indexed id, uint256 rejectedBy);
+    event RecommendationTransitioned(uint256 indexed id, uint256 newState);
+    event TokensDeposited(uint256 indexed fid, uint256 amount);
 
     function setUp() public {
         // Use default Foundry account (known private key) as deployer
@@ -71,15 +76,15 @@ contract UnitTests is Test {
         dao = new HumanMusicDAO(address(token));
         vm.stopPrank();
 
-        // Deposit 1 billion tokens (1e9 * 1e18 = 1e27)
-        uint256 depositAmount = 1_000_000_000 * 10 ** 18;
+        // Deposit 100 million tokens (100 * 1e6 * 1e18 = 1e67)
+        uint256 depositAmount = 100_000_000 * 10 ** 18;
         vm.startPrank(deployer);
         token.approve(address(dao), depositAmount);
         dao.depositRewardTokens(depositAmount);
         vm.stopPrank();
 
         // Verify deposit
-        assertEq(token.balanceOf(address(dao)), depositAmount, "DAO should have 1 billion tokens");
+        assertEq(token.balanceOf(address(dao)), depositAmount, "DAO should have 100 million tokens");
     }
 
     // ============ EIP-712 SIGNATURE HELPER ============
@@ -1138,6 +1143,484 @@ contract UnitTests is Test {
         vm.expectEmit(true, true, false, true);
         emit RecommendationSubmitted(1, FID_1, YOUTUBE_VIDEO_ID, CAST_HASH, COUNTRY_1);
         dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+    }
+
+    // ============ voteOnRecommendation TESTS ============
+
+    /**
+     * @notice Test that voteOnRecommendation can only be called by registered user
+     */
+    function test_voteOnRecommendation_OnlyRegisteredUser() public {
+        // Register user1 and submit a recommendation
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        vm.warp(block.timestamp + 25 hours);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Try to vote without registering user2
+        vm.prank(user2);
+        vm.expectRevert("User not registered");
+        dao.voteOnRecommendation(1, FID_2, true);
+    }
+
+    /**
+     * @notice Test that voteOnRecommendation reverts for invalid recommendation
+     */
+    function test_voteOnRecommendation_RevertsIfInvalidRecommendation() public {
+        // Register both users
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        vm.prank(user2);
+        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+
+        // Try to vote on non-existent recommendation
+        vm.prank(user2);
+        vm.expectRevert("Invalid recommendation ID");
+        dao.voteOnRecommendation(999, FID_2, true);
+    }
+
+    /**
+     * @notice Test that voteOnRecommendation reverts if voting period expired
+     */
+    function test_voteOnRecommendation_RevertsIfVotingPeriodExpired() public {
+        // Register both users
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        vm.prank(user2);
+        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+
+        // Submit recommendation
+        vm.warp(block.timestamp + 25 hours);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Get submission time
+        (,,,,, uint256 duration, uint256 submissionTime,,,,,,) = dao.recommendations(1);
+
+        // Advance past voting period (24 hours from submission)
+        vm.warp(submissionTime + 25 hours);
+
+        // Try to vote
+        vm.prank(user2);
+        vm.expectRevert("Voting period expired");
+        dao.voteOnRecommendation(1, FID_2, true);
+    }
+
+    /**
+     * @notice Test that voteOnRecommendation reverts if already voted
+     */
+    function test_voteOnRecommendation_RevertsIfAlreadyVoted() public {
+        // Register both users
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        vm.prank(user2);
+        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+
+        // Submit recommendation
+        vm.warp(block.timestamp + 25 hours);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Vote first time
+        vm.prank(user2);
+        dao.voteOnRecommendation(1, FID_2, true);
+
+        // Try to vote again
+        vm.prank(user2);
+        vm.expectRevert("Already voted");
+        dao.voteOnRecommendation(1, FID_2, true);
+    }
+
+    /**
+     * @notice Test that voteOnRecommendation reverts if voting on own submission
+     */
+    function test_voteOnRecommendation_RevertsIfVotingOnOwnSubmission() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // Submit recommendation
+        vm.warp(block.timestamp + 25 hours);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Try to vote on own submission
+        vm.prank(user1);
+        vm.expectRevert("Cannot vote on own submission");
+        dao.voteOnRecommendation(1, FID_1, true);
+    }
+
+    /**
+     * @notice Test that voteOnRecommendation sets hasVoted to true
+     */
+    function test_voteOnRecommendation_SetsHasVoted() public {
+        // Register both users
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        vm.prank(user2);
+        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+
+        // Submit recommendation
+        vm.warp(block.timestamp + 25 hours);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Check hasVoted is false initially
+        assertFalse(dao.hasVoted(FID_2, 1), "Should not have voted initially");
+
+        // Vote
+        vm.prank(user2);
+        dao.voteOnRecommendation(1, FID_2, true);
+
+        // Check hasVoted is now true
+        assertTrue(dao.hasVoted(FID_2, 1), "Should have voted");
+    }
+
+    /**
+     * @notice Test that voteOnRecommendation handles upvotes correctly
+     */
+    function test_voteOnRecommendation_UpvoteWorks() public {
+        // Register both users
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        vm.prank(user2);
+        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+
+        // Submit recommendation
+        vm.warp(block.timestamp + 25 hours);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Get initial state
+        (,,,,,,,,, uint256 upvotes, uint256 downvotes,,) = dao.recommendations(1);
+        assertEq(upvotes, 0, "Initial upvotes should be 0");
+        assertEq(downvotes, 0, "Initial downvotes should be 0"); // Get initial reputation
+        (,,,,,,,,, uint256 reputationScore) = getUserData(FID_1);
+        assertEq(reputationScore, 100, "Initial reputation should be 100");
+
+        // Vote up
+        vm.prank(user2);
+        dao.voteOnRecommendation(1, FID_2, true);
+
+        // Check upvotes increased
+        (,,,,,,,,, upvotes, downvotes,,) = dao.recommendations(1);
+        assertEq(upvotes, 1, "Upvotes should be 1");
+        assertEq(downvotes, 0, "Downvotes should still be 0");
+
+        // Check submitter reputation increased
+        (,,,,,,, uint256 tokenBalance,, uint256 reputationScore2) = getUserData(FID_1);
+        assertEq(reputationScore2, 105, "Reputation should increase by 5");
+
+        // Check submitter got reward
+        assertEq(tokenBalance, 10 * 10 ** 18 + 5 * 10 ** 18, "Submitter should have submission + upvote reward");
+
+        // Check voter got reward
+        (,,,,,,, tokenBalance,,) = getUserData(FID_2);
+        assertEq(tokenBalance, 1 * 10 ** 18, "Voter should have voting reward");
+    }
+
+    /**
+     * @notice Test that voteOnRecommendation handles downvotes correctly
+     */
+    function test_voteOnRecommendation_DownvoteWorks() public {
+        // Register both users
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        vm.prank(user2);
+        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+
+        // Submit recommendation
+        vm.warp(block.timestamp + 25 hours);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Get initial reputation
+        (,,,,,,, uint256 tokenBalance,, uint256 reputationScore) = getUserData(FID_1);
+        assertEq(reputationScore, 100, "Initial reputation should be 100");
+
+        // Vote down
+        vm.prank(user2);
+        dao.voteOnRecommendation(1, FID_2, false);
+
+        // Check downvotes increased
+        (,,,,,,,,, uint256 upvotes, uint256 downvotes,,) = dao.recommendations(1);
+        assertEq(upvotes, 0, "Upvotes should be 0");
+        assertEq(downvotes, 1, "Downvotes should be 1");
+
+        // Check submitter reputation decreased
+        (,,,,,,, tokenBalance,, reputationScore) = getUserData(FID_1);
+        assertEq(reputationScore, 98, "Reputation should decrease by 2");
+
+        // Check voter got reward
+        (,,,,,,, tokenBalance,,) = getUserData(FID_2);
+        assertEq(tokenBalance, 1 * 10 ** 18, "Voter should have voting reward");
+    }
+
+    /**
+     * @notice Test that voteOnRecommendation emits VoteCast event
+     */
+    function test_voteOnRecommendation_EmitsEvent() public {
+        // Register both users
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        vm.prank(user2);
+        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+
+        // Submit recommendation
+        vm.warp(block.timestamp + 25 hours);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Vote
+        vm.prank(user2);
+        vm.expectEmit(true, true, false, false);
+        emit VoteCast(1, FID_2, true);
+        dao.voteOnRecommendation(1, FID_2, true);
+    }
+
+    // ============ approveRecommendation TESTS ============
+
+    /**
+     * @notice Test that approveRecommendation can only be called by reviewer
+     */
+    function test_approveRecommendation_OnlyReviewer() public {
+        // Register user1 and submit recommendation
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        vm.prank(user2);
+        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+
+        vm.warp(block.timestamp + 25 hours);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Try to approve without being reviewer
+        vm.prank(user2);
+        vm.expectRevert("Not authorized reviewer");
+        dao.approveRecommendation(1, FID_2);
+    }
+
+    /**
+     * @notice Test that approveRecommendation updates recommendation state
+     */
+    function test_approveRecommendation_UpdatesState() public {
+        // Register user1 and submit recommendation
+        vm.warp(block.timestamp + 25 hours);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        vm.prank(user2);
+        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Give user2 1000 tokens, then make them reviewer
+        vm.startPrank(deployer);
+        token.transfer(user2, 1000 * 10 ** 18);
+        vm.stopPrank();
+
+        vm.prank(user2);
+        token.approve(address(dao), 1000 * 10 ** 18);
+        vm.prank(user2);
+        dao.userDepositTokens(FID_2, 1000 * 10 ** 18);
+
+        // Check user2 token balance in contract
+        (,,,,,,, uint256 tokenBalance,,) = getUserData(FID_2);
+        assertEq(tokenBalance, 1000 * 10 ** 18, "User2 should have 1000 tokens in contract");
+
+        // Now grant reviewer role
+        vm.prank(deployer);
+        dao.grantReviewerRole(FID_2);
+
+        // Check initial state
+        (
+            uint256 id,
+            uint256 submitterFid,
+            string memory youtubeVideoId,
+            string memory castHash,
+            string memory country,
+            uint256 duration,
+            uint256 submissionTime,
+            uint256 scheduledTime,
+            HumanMusicDAO.RecommendationState state,
+            uint256 upvotes,
+            uint256 downvotes,
+            uint256 rewardsPaid,
+            bool isActive
+        ) = dao.recommendations(1);
+        assertEq(uint256(state), 0, "Initial state should be SUBMITTED (0)");
+
+        // Approve recommendation
+        vm.prank(user2);
+        vm.expectEmit(true, false, false, false);
+        emit RecommendationApproved(1, FID_2);
+        dao.approveRecommendation(1, FID_2);
+
+        // Check state updated
+        (
+            id,
+            submitterFid,
+            youtubeVideoId,
+            castHash,
+            country,
+            duration,
+            submissionTime,
+            scheduledTime,
+            state,
+            upvotes,
+            downvotes,
+            rewardsPaid,
+            isActive
+        ) = dao.recommendations(1);
+        assertEq(uint256(state), 1, "State should be APPROVED (1)");
+
+        // Check recommendation added to queue
+        uint256[] memory queue = dao.getSongQueue();
+        assertEq(queue.length, 1, "Queue should have 1 item");
+        assertEq(queue[0], 1, "Queue should contain recommendation 1");
+    }
+
+    // ============ rejectRecommendation TESTS ============
+
+    /**
+     * @notice Test that rejectRecommendation can only be called by reviewer
+     */
+    function test_rejectRecommendation_OnlyReviewer() public {
+        // Register user1 and submit recommendation
+        vm.warp(block.timestamp + 25 hours);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Register user2 but don't make them a reviewer (use current timestamp for deadline)
+        uint256 currentTime = block.timestamp;
+        uint256 deadline2 = currentTime + 100 hours; // Large deadline to avoid expiration
+        bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline2, deployerPrivateKey());
+        vm.prank(user2);
+        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline2, signature2);
+
+        // Try to reject without being reviewer
+        vm.prank(user2);
+        vm.expectRevert("Not authorized reviewer");
+        dao.rejectRecommendation(1, FID_2);
+    }
+
+    /**
+     * @notice Test that rejectRecommendation marks recommendation as inactive
+     */
+    function test_rejectRecommendation_MarksAsInactive() public {
+        // Register user1 and submit recommendation
+        vm.warp(block.timestamp + 25 hours);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
+        vm.prank(user2);
+        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        vm.prank(user2);
+        dao.submitRecommendation(FID_2, "testvid0014");
+
+        // Give user2 1000 tokens, then make them reviewer
+        vm.startPrank(deployer);
+        token.transfer(user2, 1000 * 10 ** 18);
+        vm.stopPrank();
+
+        vm.prank(user2);
+        token.approve(address(dao), 1000 * 10 ** 18);
+        vm.prank(user2);
+        dao.userDepositTokens(FID_2, 1000 * 10 ** 18);
+
+        vm.prank(deployer);
+        dao.grantReviewerRole(FID_2);
+
+        // Check video is submitted
+        assertTrue(dao.isVideoSubmitted(YOUTUBE_VIDEO_ID), "Video should be submitted");
+
+        // Check recommendation is active
+        (
+            uint256 id,
+            uint256 submitterFid,
+            string memory youtubeVideoId,
+            string memory castHash,
+            string memory country,
+            uint256 duration,
+            uint256 submissionTime,
+            uint256 scheduledTime,
+            HumanMusicDAO.RecommendationState state,
+            uint256 upvotes,
+            uint256 downvotes,
+            uint256 rewardsPaid,
+            bool isActive
+        ) = dao.recommendations(1);
+        assertTrue(isActive, "Recommendation should be active");
+
+        // Reject recommendation
+        vm.prank(user2);
+        vm.expectEmit(true, true, false, false);
+        emit RecommendationRejected(1, FID_2);
+        dao.rejectRecommendation(1, FID_2);
+
+        // Check recommendation is inactive
+        (
+            id,
+            submitterFid,
+            youtubeVideoId,
+            castHash,
+            country,
+            duration,
+            submissionTime,
+            scheduledTime,
+            state,
+            upvotes,
+            downvotes,
+            rewardsPaid,
+            isActive
+        ) = dao.recommendations(1);
+        assertFalse(isActive, "Recommendation should be inactive");
+
+        // Check video can be resubmitted
+        assertFalse(dao.isVideoSubmitted(YOUTUBE_VIDEO_ID), "Video should be available for resubmission");
     }
 
     // ============ HELPER FUNCTIONS ============
