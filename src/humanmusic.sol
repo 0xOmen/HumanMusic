@@ -411,6 +411,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     /**
      * @dev Add a new address to a user's registered addresses (owner only)
      * @notice Allows the owner to add an address to an existing User struct
+     * @notice This is for Clients that have different wallets and addresses for the same FID
      * @param _fid The Farcaster FID of the user
      * @param _newAddress The address to add to the user's addresses
      */
