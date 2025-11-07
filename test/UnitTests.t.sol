@@ -51,6 +51,8 @@ contract UnitTests is Test {
     event RecommendationRejected(uint256 indexed id, uint256 rejectedBy);
     event RecommendationTransitioned(uint256 indexed id, uint256 newState);
     event TokensDeposited(uint256 indexed fid, uint256 amount);
+    event TokensWithdrawn(uint256 indexed fid, uint256 amount);
+    event DurationSet(uint256 indexed recommendationId, string youtubeVideoId, uint256 duration);
 
     function setUp() public {
         // Use default Foundry account (known private key) as deployer
@@ -107,6 +109,41 @@ contract UnitTests is Test {
 
         // Create struct hash
         bytes32 structHash = keccak256(abi.encode(USER_REGISTRATION_TYPEHASH, fid, userAddress, deadline));
+
+        // Create digest
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
+
+        // Sign with the private key
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerPrivateKey, digest);
+        signature = abi.encodePacked(r, s, v);
+    }
+
+    /**
+     * @notice Generate EIP-712 signature for video duration verification
+     * @param youtubeVideoId The YouTube video ID
+     * @param duration The duration in seconds
+     * @param deadline The signature deadline
+     * @param signerPrivateKey The private key of the signer (backend signer)
+     * @return signature The EIP-712 signature
+     */
+    function generateDurationSignature(
+        string memory youtubeVideoId,
+        uint256 duration,
+        uint256 deadline,
+        uint256 signerPrivateKey
+    ) internal view returns (bytes memory signature) {
+        // Get domain separator from contract
+        (bytes32 domainSeparator,,,,) = dao.getDomainInfo();
+
+        // Create struct hash
+        bytes32 structHash = keccak256(
+            abi.encode(
+                keccak256("DurationVerification(string youtubeVideoId,uint256 duration,uint256 deadline)"),
+                keccak256(bytes(youtubeVideoId)),
+                duration,
+                deadline
+            )
+        );
 
         // Create digest
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
@@ -1623,6 +1660,209 @@ contract UnitTests is Test {
         assertFalse(dao.isVideoSubmitted(YOUTUBE_VIDEO_ID), "Video should be available for resubmission");
     }
 
+    // ============ setVideoDuration TESTS ============
+
+    /**
+     * @notice Test that setVideoDuration reverts if recommendationId is invalid
+     */
+    function test_setVideoDuration_RevertsIfInvalidRecommendationId() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 180, deadline, deployerPrivateKey());
+
+        vm.expectRevert("Invalid recommendation ID");
+        dao.setVideoDuration(999, 180, deadline, signature);
+    }
+
+    /**
+     * @notice Test that setVideoDuration reverts if duration is zero
+     */
+    function test_setVideoDuration_RevertsIfDurationZero() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 0, deadline, deployerPrivateKey());
+
+        vm.expectRevert("Duration must be 1-600 seconds");
+        dao.setVideoDuration(1, 0, deadline, signature);
+    }
+
+    /**
+     * @notice Test that setVideoDuration reverts if duration is greater than 600
+     */
+    function test_setVideoDuration_RevertsIfDurationGreaterThan600() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 601, deadline, deployerPrivateKey());
+
+        vm.expectRevert("Duration must be 1-600 seconds");
+        dao.setVideoDuration(1, 601, deadline, signature);
+    }
+
+    /**
+     * @notice Test that setVideoDuration reverts if duration is already set
+     */
+    function test_setVideoDuration_RevertsIfDurationAlreadySet() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 180, deadline, deployerPrivateKey());
+
+        // Set duration first time
+        dao.setVideoDuration(1, 180, deadline, signature);
+
+        // Try to set again
+        uint256 newDeadline = block.timestamp + 1 hours;
+        bytes memory signature2 = generateDurationSignature(YOUTUBE_VIDEO_ID, 200, newDeadline, deployerPrivateKey());
+        vm.expectRevert("Duration already set");
+        dao.setVideoDuration(1, 200, newDeadline, signature2);
+    }
+
+    /**
+     * @notice Test that setVideoDuration reverts if recommendation is not active
+     */
+    function test_setVideoDuration_RevertsIfRecommendationNotActive() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // Reject the recommendation to make it inactive
+        vm.prank(deployer);
+        dao.grantReviewerRole(FID_2);
+        vm.prank(user2);
+        dao.rejectRecommendation(1, FID_2);
+
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 180, deadline, deployerPrivateKey());
+
+        vm.expectRevert("Recommendation not active");
+        dao.setVideoDuration(1, 180, deadline, signature);
+    }
+
+    /**
+     * @notice Test that setVideoDuration reverts with invalid signer
+     */
+    function test_setVideoDuration_RevertsIfInvalidSigner() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        uint256 deadline = block.timestamp + 1 hours;
+        // Use wrong private key (nonOwner's key instead of deployer's)
+        bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 180, deadline, nonOwnerPrivateKey());
+
+        vm.expectRevert("Invalid signature");
+        dao.setVideoDuration(1, 180, deadline, signature);
+    }
+
+    /**
+     * @notice Test that setVideoDuration sets duration correctly and emits event
+     */
+    function test_setVideoDuration_SetsDurationAndEmitsEvent() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 180, deadline, deployerPrivateKey());
+
+        // Check initial duration is 0
+        (
+            uint256 id,
+            uint256 submitterFid,
+            string memory youtubeVideoId,
+            string memory castHash,
+            string memory country,
+            uint256 duration,
+            uint256 submissionTime,
+            uint256 scheduledTime,
+            HumanMusicDAO.RecommendationState state,
+            uint256 upvotes,
+            uint256 downvotes,
+            uint256 rewardsPaid,
+            bool isActive
+        ) = dao.recommendations(1);
+        assertEq(duration, 0, "Initial duration should be 0");
+
+        // Set duration
+        vm.expectEmit(true, false, false, false);
+        emit DurationSet(1, YOUTUBE_VIDEO_ID, 180);
+        dao.setVideoDuration(1, 180, deadline, signature);
+
+        // Check duration is set
+        (
+            id,
+            submitterFid,
+            youtubeVideoId,
+            castHash,
+            country,
+            duration,
+            submissionTime,
+            scheduledTime,
+            state,
+            upvotes,
+            downvotes,
+            rewardsPaid,
+            isActive
+        ) = dao.recommendations(1);
+        assertEq(duration, 180, "Duration should be set to 180");
+    }
+
+    // ============ withdrawTokens TESTS ============
+
+    /**
+     * @notice Test that withdrawTokens can only be called by addresses associated with the FID
+     */
+    function test_withdrawTokens_OnlyRegisteredAddress() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // user2 has 1000 tokens deposited, but try to withdraw from user1's FID
+        vm.prank(user2);
+        vm.expectRevert("Sender addr not registered to FID");
+        dao.withdrawTokens(FID_1, 100 * 10 ** 18);
+    }
+
+    /**
+     * @notice Test that withdrawTokens reverts if user tries to withdraw more than their balance
+     */
+    function test_withdrawTokens_RevertsIfInsufficientBalance() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // user2 has 1000 tokens, try to withdraw more
+        vm.prank(user2);
+        vm.expectRevert("Insufficient balance");
+        dao.withdrawTokens(FID_2, 2000 * 10 ** 18);
+    }
+
+    /**
+     * @notice Test that withdrawTokens removes tokens from contract, deposits to user, and emits event
+     */
+    function test_withdrawTokens_TransfersTokensAndEmitsEvent() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // Check initial balances
+        (,,,,,,, uint256 tokenBalanceBefore,,) = getUserData(FID_2);
+        assertEq(tokenBalanceBefore, 1000 * 10 ** 18, "User2 should have 1000 tokens");
+
+        uint256 contractBalanceBefore = token.balanceOf(address(dao));
+        uint256 user2BalanceBefore = token.balanceOf(user2);
+
+        // Withdraw tokens
+        uint256 withdrawAmount = 500 * 10 ** 18;
+        vm.prank(user2);
+        vm.expectEmit(true, false, false, false);
+        emit TokensWithdrawn(FID_2, withdrawAmount);
+        dao.withdrawTokens(FID_2, withdrawAmount);
+
+        // Check user's token balance in contract decreased
+        (,,,,,,, uint256 tokenBalanceAfter,,) = getUserData(FID_2);
+        assertEq(tokenBalanceAfter, 500 * 10 ** 18, "User2 should have 500 tokens remaining");
+
+        // Check contract balance decreased
+        uint256 contractBalanceAfter = token.balanceOf(address(dao));
+        assertEq(contractBalanceAfter, contractBalanceBefore - withdrawAmount, "Contract balance should decrease");
+
+        // Check user's ERC20 balance increased
+        uint256 user2BalanceAfter = token.balanceOf(user2);
+        assertEq(user2BalanceAfter, user2BalanceBefore + withdrawAmount, "User2 ERC20 balance should increase");
+    }
+
     // ============ HELPER FUNCTIONS ============
 
     /**
@@ -1645,6 +1885,39 @@ contract UnitTests is Test {
         )
     {
         return dao.users(fid);
+    }
+
+    /**
+     * @notice Setup common test scenario: register users, submit recommendation, and fund user2 as reviewer
+     * @dev Warps time forward, registers user1 and user2, has user1 submit a recommendation,
+     *      and gives user2 1000 tokens deposited into the contract
+     */
+    function setupUsersWithRecommendationAndReviewerTokens() internal {
+        vm.warp(block.timestamp + 25 hours);
+
+        uint256 deadline = block.timestamp + 1 hours;
+
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
+
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        vm.prank(user2);
+        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Give user2 1000 tokens, then make them reviewer
+        vm.startPrank(deployer);
+        token.transfer(user2, 1000 * 10 ** 18);
+        vm.stopPrank();
+
+        vm.prank(user2);
+        token.approve(address(dao), 1000 * 10 ** 18);
+        vm.prank(user2);
+        dao.userDepositTokens(FID_2, 1000 * 10 ** 18);
     }
 
     /**
