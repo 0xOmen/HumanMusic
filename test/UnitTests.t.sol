@@ -30,6 +30,8 @@ contract UnitTests is Test {
     string public constant USERNAME_2 = "testuser2";
     string public constant COUNTRY_1 = "US";
     string public constant COUNTRY_2 = "CA";
+    string public constant YOUTUBE_VIDEO_ID = "rs6Y4kZ8qtw";
+    string public constant CAST_HASH = "0x47636b8ee78c4b05e95e170aca97f76b5d8c9e47";
 
     // EIP-712 constants
     bytes32 private constant DOMAIN_TYPEHASH =
@@ -41,6 +43,9 @@ contract UnitTests is Test {
     event UserRegistered(uint256 indexed fid, string username, string country, address indexed registeredAddress);
     event BackendSignerUpdated(address indexed oldSigner, address indexed newSigner);
     event UserAddressAdded(uint256 indexed fid, address indexed registeredAddress);
+    event RecommendationSubmitted(
+        uint256 indexed id, uint256 indexed submitterFid, string youtubeVideoId, string castHash, string country
+    );
 
     function setUp() public {
         // Use default Foundry account (known private key) as deployer
@@ -564,6 +569,575 @@ contract UnitTests is Test {
         vm.expectEmit(true, true, false, false);
         emit UserAddressAdded(FID_1, newAddress);
         dao.addUserAddressFromOwner(FID_1, newAddress);
+    }
+
+    // ============ submitRecommendation TESTS ============
+
+    /**
+     * @notice Test that submitRecommendation can only be called by registered user
+     */
+    function test_submitRecommendation_OnlyRegisteredUser() public {
+        // Try to submit without registering
+        vm.prank(user1);
+        vm.expectRevert("User not registered");
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+    }
+
+    /**
+     * @notice Test that submitRecommendation reverts if video ID is not exactly 11 characters
+     */
+    function test_submitRecommendation_RevertsIfVideoIdNot11Characters() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // Try with 10 characters
+        vm.prank(user1);
+        vm.expectRevert("YouTube video ID must be 11 characters");
+        dao.submitRecommendation(FID_1, "rs6Y4kZ8qt");
+
+        // Try with 12 characters
+        vm.prank(user1);
+        vm.expectRevert("YouTube video ID must be 11 characters");
+        dao.submitRecommendation(FID_1, "rs6Y4kZ8qtwx");
+    }
+
+    /**
+     * @notice Test that submitRecommendation reverts if video already submitted
+     */
+    function test_submitRecommendation_RevertsIfVideoAlreadySubmitted() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Submit first time
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        //advance by 48 hours
+        vm.warp(block.timestamp + 48 hours);
+        // Try to submit same video again
+        vm.prank(user1);
+        vm.expectRevert("Video already submitted");
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+    }
+
+    /**
+     * @notice Test that submitRecommendation reverts if user already submitted in last 24 hours
+     */
+    function test_submitRecommendation_RevertsIfAlreadySubmittedToday() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Submit first video
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Try to submit another video on same day
+        vm.prank(user1);
+        vm.expectRevert("Can only submit one video per day");
+        dao.submitRecommendation(FID_1, "abcdefghijk");
+    }
+
+    /**
+     * @notice Test that submitRecommendation increments nextRecommendationId
+     */
+    function test_submitRecommendation_IncrementsNextRecommendationId() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        uint256 initialId = dao.nextRecommendationId();
+        assertEq(initialId, 1, "Initial recommendation ID should be 1");
+
+        // Submit recommendation with unique video ID
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Check ID incremented
+        assertEq(dao.nextRecommendationId(), initialId + 1, "Recommendation ID should be incremented");
+    }
+
+    /**
+     * @notice Test that submitRecommendation saves recommendation correctly
+     */
+    function test_submitRecommendation_SavesRecommendationCorrectly() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Submit recommendation with unique video ID
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Check recommendation data
+        (
+            uint256 id,
+            uint256 submitterFid,
+            string memory youtubeVideoId,
+            string memory castHash,
+            string memory country,
+            uint256 duration,
+            uint256 submissionTime,
+            uint256 scheduledTime,
+            HumanMusicDAO.RecommendationState state,
+            uint256 upvotes,
+            uint256 downvotes,
+            uint256 rewardsPaid,
+            bool isActive
+        ) = dao.recommendations(1);
+
+        assertEq(id, 1, "ID should be 1");
+        assertEq(submitterFid, FID_1, "Submitter FID should match");
+        assertEq(youtubeVideoId, YOUTUBE_VIDEO_ID, "YouTube video ID should match");
+        assertEq(castHash, "", "Cast hash should be empty for direct submission");
+        assertEq(country, COUNTRY_1, "Country should match");
+        assertEq(duration, 0, "Duration should be 0 initially");
+        assertEq(submissionTime, block.timestamp, "Submission time should be current timestamp");
+        assertEq(scheduledTime, 0, "Scheduled time should be 0");
+        assertEq(uint256(state), 0, "State should be SUBMITTED (0)");
+        assertEq(upvotes, 0, "Upvotes should be 0");
+        assertEq(downvotes, 0, "Downvotes should be 0");
+        assertEq(rewardsPaid, 0, "Rewards paid should be 0");
+        assertTrue(isActive, "Recommendation should be active");
+    }
+
+    /**
+     * @notice Test that submitRecommendation sets submittedVideoIds to true
+     */
+    function test_submitRecommendation_SetsSubmittedVideoIds() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Check video not submitted
+        assertFalse(dao.isVideoSubmitted(YOUTUBE_VIDEO_ID), "Video should not be submitted initially");
+
+        // Submit recommendation
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Check video is now submitted
+        assertTrue(dao.isVideoSubmitted(YOUTUBE_VIDEO_ID), "Video should be submitted");
+    }
+
+    /**
+     * @notice Test that submitRecommendation increments user's submissionCount
+     */
+    function test_submitRecommendation_IncrementsSubmissionCount() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Check initial submission count
+        (,,, uint256 submissionCount,,,,,,) = getUserData(FID_1);
+        assertEq(submissionCount, 0, "Initial submission count should be 0");
+
+        // Submit recommendation with unique video ID
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Check submission count incremented
+        (,,, submissionCount,,,,,,) = getUserData(FID_1);
+        assertEq(submissionCount, 1, "Submission count should be 1");
+    }
+
+    /**
+     * @notice Test that submitRecommendation updates user's lastSubmissionDay
+     */
+    function test_submitRecommendation_UpdatesLastSubmissionDay() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        uint256 currentDay = block.timestamp / 1 days;
+
+        // Check initial last submission day
+        (,,,,, uint256 lastSubmissionDay,,,,) = getUserData(FID_1);
+        assertEq(lastSubmissionDay, 0, "Initial last submission day should be 0");
+
+        // Submit recommendation with unique video ID
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Check last submission day updated
+        (,,,,, lastSubmissionDay,,,,) = getUserData(FID_1);
+        assertEq(lastSubmissionDay, currentDay, "Last submission day should be current day");
+    }
+
+    /**
+     * @notice Test that submitRecommendation rewards user with tokens
+     */
+    function test_submitRecommendation_RewardsUser() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Check initial token balance
+        (,,,,,,, uint256 tokenBalance, bool isReviewer, uint256 reputationScore) = getUserData(FID_1);
+        assertEq(tokenBalance, 0, "Initial token balance should be 0");
+
+        // Submit recommendation with unique video ID
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Check token balance increased
+        (,,,,,,, tokenBalance, isReviewer, reputationScore) = getUserData(FID_1);
+        assertEq(tokenBalance, 10 * 10 ** 18, "Token balance should be 10 tokens");
+    }
+
+    /**
+     * @notice Test that submitRecommendation emits RecommendationSubmitted event
+     */
+    function test_submitRecommendation_EmitsEvent() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Submit recommendation
+        vm.prank(user1);
+        vm.expectEmit(true, true, false, true);
+        emit RecommendationSubmitted(1, FID_1, YOUTUBE_VIDEO_ID, "", COUNTRY_1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+    }
+
+    // ============ submitRecommendationFromCast TESTS ============
+
+    /**
+     * @notice Test that submitRecommendationFromCast can only be called by owner
+     */
+    function test_submitRecommendationFromCast_OnlyOwner() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Try to call from non-owner
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+    }
+
+    /**
+     * @notice Test that submitRecommendationFromCast reverts if user not registered
+     */
+    function test_submitRecommendationFromCast_RevertsIfUserNotRegistered() public {
+        vm.prank(deployer);
+        vm.expectRevert("User not registered");
+        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+    }
+
+    /**
+     * @notice Test that submitRecommendationFromCast reverts if video ID is not exactly 11 characters
+     */
+    function test_submitRecommendationFromCast_RevertsIfVideoIdNot11Characters() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Try with 10 characters
+        vm.prank(deployer);
+        vm.expectRevert("YouTube video ID must be 11 characters");
+        dao.submitRecommendationFromCast(FID_1, "rs6Y4kZ8qt", CAST_HASH);
+    }
+
+    /**
+     * @notice Test that submitRecommendationFromCast reverts if video already submitted
+     */
+    function test_submitRecommendationFromCast_RevertsIfVideoAlreadySubmitted() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Submit first time via direct submission
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Try to submit same video again via cast
+        vm.prank(deployer);
+        vm.expectRevert("Video already submitted");
+        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+    }
+
+    /**
+     * @notice Test that submitRecommendationFromCast reverts if user already submitted in last 24 hours
+     */
+    function test_submitRecommendationFromCast_RevertsIfAlreadySubmittedToday() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Submit first video via direct submission
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+
+        // Try to submit another video via cast on same day
+        vm.prank(deployer);
+        vm.expectRevert("Can only submit one video per day");
+        dao.submitRecommendationFromCast(FID_1, "abcdefghijk", CAST_HASH);
+    }
+
+    /**
+     * @notice Test that submitRecommendationFromCast increments nextRecommendationId
+     */
+    function test_submitRecommendationFromCast_IncrementsNextRecommendationId() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        uint256 initialId = dao.nextRecommendationId();
+
+        // Submit recommendation from cast with unique video ID
+        vm.prank(deployer);
+        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+
+        // Check ID incremented
+        assertEq(dao.nextRecommendationId(), initialId + 1, "Recommendation ID should be incremented");
+    }
+
+    /**
+     * @notice Test that submitRecommendationFromCast saves recommendation correctly with castHash
+     */
+    function test_submitRecommendationFromCast_SavesRecommendationCorrectly() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Submit recommendation from cast with unique video ID
+        vm.prank(deployer);
+        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+
+        // Check recommendation data
+        (
+            uint256 id,
+            uint256 submitterFid,
+            string memory youtubeVideoId,
+            string memory castHash,
+            string memory country,
+            uint256 duration,
+            uint256 submissionTime,
+            uint256 scheduledTime,
+            HumanMusicDAO.RecommendationState state,
+            uint256 upvotes,
+            uint256 downvotes,
+            uint256 rewardsPaid,
+            bool isActive
+        ) = dao.recommendations(1);
+
+        assertEq(id, 1, "ID should be 1");
+        assertEq(submitterFid, FID_1, "Submitter FID should match");
+        assertEq(youtubeVideoId, YOUTUBE_VIDEO_ID, "YouTube video ID should match");
+        assertEq(castHash, CAST_HASH, "Cast hash should match");
+        assertEq(country, COUNTRY_1, "Country should match");
+        assertEq(duration, 0, "Duration should be 0 initially");
+        assertEq(submissionTime, block.timestamp, "Submission time should be current timestamp");
+        assertEq(scheduledTime, 0, "Scheduled time should be 0");
+        assertEq(uint256(state), 0, "State should be SUBMITTED (0)");
+        assertEq(upvotes, 0, "Upvotes should be 0");
+        assertEq(downvotes, 0, "Downvotes should be 0");
+        assertEq(rewardsPaid, 0, "Rewards paid should be 0");
+        assertTrue(isActive, "Recommendation should be active");
+    }
+
+    /**
+     * @notice Test that submitRecommendationFromCast sets submittedVideoIds to true
+     */
+    function test_submitRecommendationFromCast_SetsSubmittedVideoIds() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Check video not submitted
+        assertFalse(dao.isVideoSubmitted(YOUTUBE_VIDEO_ID), "Video should not be submitted initially");
+
+        // Submit recommendation from cast
+        vm.prank(deployer);
+        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+
+        // Check video is now submitted
+        assertTrue(dao.isVideoSubmitted(YOUTUBE_VIDEO_ID), "Video should be submitted");
+    }
+
+    /**
+     * @notice Test that submitRecommendationFromCast increments user's submissionCount
+     */
+    function test_submitRecommendationFromCast_IncrementsSubmissionCount() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Check initial submission count
+        (,,, uint256 submissionCount,,,,,,) = getUserData(FID_1);
+        assertEq(submissionCount, 0, "Initial submission count should be 0");
+
+        // Submit recommendation from cast with unique video ID
+        vm.prank(deployer);
+        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+
+        // Check submission count incremented
+        (,,, submissionCount,,,,,,) = getUserData(FID_1);
+        assertEq(submissionCount, 1, "Submission count should be 1");
+    }
+
+    /**
+     * @notice Test that submitRecommendationFromCast updates user's lastSubmissionDay
+     */
+    function test_submitRecommendationFromCast_UpdatesLastSubmissionDay() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        uint256 currentDay = block.timestamp / 1 days;
+
+        // Check initial last submission day
+        (,,,,, uint256 lastSubmissionDay,,,,) = getUserData(FID_1);
+        assertEq(lastSubmissionDay, 0, "Initial last submission day should be 0");
+
+        // Submit recommendation from cast with unique video ID
+        vm.prank(deployer);
+        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+
+        // Check last submission day updated
+        (,,,,, lastSubmissionDay,,,,) = getUserData(FID_1);
+        assertEq(lastSubmissionDay, currentDay, "Last submission day should be current day");
+    }
+
+    /**
+     * @notice Test that submitRecommendationFromCast rewards user with tokens
+     */
+    function test_submitRecommendationFromCast_RewardsUser() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Check initial token balance
+        (,,,,,,, uint256 tokenBalance, bool isReviewer, uint256 reputationScore) = getUserData(FID_1);
+        assertEq(tokenBalance, 0, "Initial token balance should be 0");
+
+        // Submit recommendation from cast with unique video ID
+        vm.prank(deployer);
+        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+
+        // Check token balance increased
+        (,,,,,,, tokenBalance, isReviewer, reputationScore) = getUserData(FID_1);
+        assertEq(tokenBalance, 10 * 10 ** 18, "Token balance should be 10 tokens");
+    }
+
+    /**
+     * @notice Test that submitRecommendationFromCast emits RecommendationSubmitted event
+     */
+    function test_submitRecommendationFromCast_EmitsEvent() public {
+        // Register user1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // advance by 25 hours
+        vm.warp(block.timestamp + 25 hours);
+
+        // Submit recommendation from cast with unique video ID
+        vm.prank(deployer);
+        vm.expectEmit(true, true, false, true);
+        emit RecommendationSubmitted(1, FID_1, YOUTUBE_VIDEO_ID, CAST_HASH, COUNTRY_1);
+        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
     }
 
     // ============ HELPER FUNCTIONS ============
