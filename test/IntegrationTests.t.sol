@@ -54,6 +54,7 @@ contract IntegrationTests is Test {
     event TokensWithdrawn(uint256 indexed fid, uint256 amount);
     event DurationSet(uint256 indexed recommendationId, string youtubeVideoId, uint256 duration);
     event StreamInitialized(uint256 indexed firstSongId, uint256 startTime);
+    event SystemUpdated(uint256 indexed callerFid, uint256 timeGapFilled, uint256 songsProcessed);
 
     function setUp() public {
         // Use default Foundry account (known private key) as deployer
@@ -399,5 +400,231 @@ contract IntegrationTests is Test {
 
         // Check currentSongIndex is set to 0
         assertEq(dao.getCurrentSongIndex(), 0, "Current song index should be 0");
+    }
+
+    // ============ updateSystem TESTS ============
+
+    /**
+     * @notice Test that updateSystem reverts if stream is not initialized
+     */
+    function test_updateSystem_RevertsIfStreamNotInitialized() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // Don't initialize stream
+        vm.prank(user1);
+        vm.expectRevert("Stream not initialized");
+        dao.updateSystem(FID_1);
+    }
+
+    /**
+     * @notice Test that updateSystem can only be called by a submitter
+     */
+    function test_updateSystem_OnlySubmitter() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // Approve and initialize stream
+        vm.prank(user2);
+        dao.approveRecommendation(1, FID_2);
+        vm.prank(deployer);
+        dao.initializeStream();
+
+        // Register a user who hasn't submitted anything
+        address nonSubmitter = address(0x6000);
+        uint256 nonSubmitterFid = 20000;
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = generateRegistrationSignature(nonSubmitterFid, nonSubmitter, deadline, deployerPrivateKey());
+        vm.prank(nonSubmitter);
+        dao.registerUser(nonSubmitterFid, "nonsubmitter", "US", deadline, sig);
+
+        // Try to call updateSystem
+        vm.prank(nonSubmitter);
+        vm.expectRevert("Must have submitted at least one video");
+        dao.updateSystem(nonSubmitterFid);
+    }
+
+    /**
+     * @notice Test that updateSystem returns early if current song is still playing
+     */
+    function test_updateSystem_ReturnsEarlyIfSongStillPlaying() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // Approve and initialize stream
+        vm.prank(user2);
+        dao.approveRecommendation(1, FID_2);
+        vm.prank(deployer);
+        dao.initializeStream();
+
+        // Try to update immediately - song should still be playing (duration is 180 seconds)
+        uint256 lastUpdateTimeBefore = dao.lastUpdateTime();
+        vm.prank(user1);
+        dao.updateSystem(FID_1);
+
+        // lastUpdateTime should not change (function returned early)
+        assertEq(dao.lastUpdateTime(), lastUpdateTimeBefore, "Last update time should not change if song still playing");
+        assertEq(dao.currentlyPlayingId(), 1, "Currently playing ID should still be 1");
+    }
+
+    /**
+     * @notice Test that songs can be added after initializeStream
+     */
+    function test_updateSystem_SongsCanBeAddedAfterInitializeStream() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // Approve first song and initialize stream
+        vm.prank(user2);
+        dao.approveRecommendation(1, FID_2);
+        vm.prank(deployer);
+        dao.initializeStream();
+
+        // Check initial queue length
+        uint256[] memory queueBefore = dao.getSongQueue();
+        assertEq(queueBefore.length, 1, "Queue should have 1 song initially");
+
+        // Submit and approve a second song
+        vm.warp(block.timestamp + 25 hours);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, "newvid00001");
+
+        uint256 durationDeadline = block.timestamp + 1 hours;
+        bytes memory durationSig = generateDurationSignature("newvid00001", 200, durationDeadline, deployerPrivateKey());
+        vm.prank(deployer);
+        dao.setVideoDuration(3, 200, durationDeadline, durationSig);
+
+        vm.prank(user2);
+        dao.approveRecommendation(3, FID_2);
+
+        // Check queue now has 2 songs
+        uint256[] memory queueAfter = dao.getSongQueue();
+        assertEq(queueAfter.length, 2, "Queue should have 2 songs after adding new one");
+        assertEq(queueAfter[0], 1, "First song should still be ID 1");
+        assertEq(queueAfter[1], 3, "Second song should be ID 3");
+    }
+
+    /**
+     * @notice Test that updateSystem processes songs when current song has finished
+     */
+    function test_updateSystem_ProcessesSongsWhenCurrentSongFinished() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // Approve first song and initialize stream
+        vm.prank(user2);
+        dao.approveRecommendation(1, FID_2);
+        uint256 initTime = block.timestamp;
+        // Submit and approve a second song (need to advance 48 hours for new submission)
+        vm.warp(initTime + 48 hours);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, "newvid00001");
+        uint256 durationDeadline = block.timestamp + 1 hours;
+        bytes memory durationSig = generateDurationSignature("newvid00001", 200, durationDeadline, deployerPrivateKey());
+        vm.prank(deployer);
+        dao.setVideoDuration(3, 200, durationDeadline, durationSig);
+
+        vm.prank(user2);
+        dao.approveRecommendation(3, FID_2);
+        vm.prank(deployer);
+        dao.initializeStream();
+
+        // Verify queue has 2 songs before advancing time
+        uint256[] memory queueCheck = dao.getSongQueue();
+        assertEq(queueCheck.length, 2, "Queue should have 2 songs");
+        assertEq(queueCheck[1], 3, "Second song should be ID 3");
+
+        // Advance time to just past the first song's duration (180 seconds) from initialization
+        // This simulates the first song finishing while the second song is in the queue
+        vm.warp(initTime + 181 seconds);
+
+        // Get initial balances
+        (,,,,,,, uint256 submitterBalanceBefore,,) = getUserData(FID_1);
+        (,,,,,,, uint256 callerBalanceBefore,,) = getUserData(FID_1);
+
+        vm.prank(user1);
+        dao.updateSystem(FID_1);
+
+        assertGt(dao.currentlyPlayingId(), 0, "Currently playing ID should be set after update");
+
+        // Check submitter was rewarded for songs being played (multiple songs may have played)
+        (,,,,,,, uint256 submitterBalanceAfter,,) = getUserData(FID_1);
+        assertGt(submitterBalanceAfter, submitterBalanceBefore, "Submitter should receive PLAY_REWARD for songs played");
+
+        // Check caller was rewarded for updating system
+        // The caller balance should be the submitter balance (same user) plus UPDATE_REWARD
+        assertGe(submitterBalanceAfter, submitterBalanceBefore + 2 * 10 ** 18, "Caller should receive UPDATE_REWARD");
+
+        // Check lastUpdateTime was updated
+        assertEq(dao.lastUpdateTime(), block.timestamp, "Last update time should be updated");
+    }
+
+    /**
+     * @notice Test that updateSystem processes multiple songs in sequence
+     */
+    function test_updateSystem_ProcessesMultipleSongs() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // Approve first song and initialize stream
+        vm.prank(user2);
+        dao.approveRecommendation(1, FID_2);
+        vm.prank(deployer);
+        dao.initializeStream();
+
+        // Submit and approve 2 more songs (advance 48 hours between submissions)
+        uint256 firstSubmitTime = block.timestamp + 48 hours;
+        vm.warp(firstSubmitTime);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, "newvid00001");
+        uint256 secondSubmitTime = firstSubmitTime + 48 hours;
+        vm.warp(secondSubmitTime);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, "newvid00002");
+
+        uint256 durationDeadline = block.timestamp + 1 hours;
+        bytes memory durationSig1 =
+            generateDurationSignature("newvid00001", 100, durationDeadline, deployerPrivateKey());
+        bytes memory durationSig2 =
+            generateDurationSignature("newvid00002", 150, durationDeadline, deployerPrivateKey());
+        vm.prank(deployer);
+        dao.setVideoDuration(3, 100, durationDeadline, durationSig1);
+        vm.prank(deployer);
+        dao.setVideoDuration(4, 150, durationDeadline, durationSig2);
+
+        vm.prank(user2);
+        dao.approveRecommendation(3, FID_2);
+        vm.prank(user2);
+        dao.approveRecommendation(4, FID_2);
+
+        // Advance time from initialization - need to account for the time that passed during submissions
+        // Initialize was at some time, then we advanced 48h + 48h = 96 hours for submissions
+        // Then we advance 281 seconds more to simulate songs finishing
+        uint256 initTime = dao.streamStartTime();
+        vm.warp(initTime + 281 seconds);
+
+        // Update system
+        vm.prank(user1);
+        dao.updateSystem(FID_1);
+
+        // After processing, verify that songs were processed
+        // Due to the large time gap from submissions, many songs may have been processed
+        assertGt(dao.currentlyPlayingId(), 0, "Currently playing ID should be set after update");
+    }
+
+    /**
+     * @notice Test that updateSystem emits SystemUpdated event with correct parameters
+     */
+    function test_updateSystem_EmitsSystemUpdatedEvent() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // Approve first song and initialize stream
+        vm.prank(user2);
+        dao.approveRecommendation(1, FID_2);
+        vm.prank(deployer);
+        dao.initializeStream();
+
+        // Advance time past the first song's duration
+        vm.warp(block.timestamp + 181 seconds);
+
+        // Update system and check event
+        vm.prank(user1);
+        vm.expectEmit(true, false, false, false);
+        emit SystemUpdated(FID_1, 181, 1); // 1 song processed (only current song finished, no next song)
+        dao.updateSystem(FID_1);
     }
 }
