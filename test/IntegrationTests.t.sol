@@ -627,4 +627,59 @@ contract IntegrationTests is Test {
         emit SystemUpdated(FID_1, 181, 1); // 1 song processed (only current song finished, no next song)
         dao.updateSystem(FID_1);
     }
+
+    /**
+     * @notice Test that updateSystem processes multiple songs in sequence
+     */
+    function test_getSystemHealth_ProcessesMultipleSongs() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // Approve first song and initialize stream
+        vm.prank(user2);
+        dao.approveRecommendation(1, FID_2);
+
+        // Submit and approve 2 more songs (advance 48 hours between submissions)
+        uint256 firstSubmitTime = block.timestamp + 48 hours;
+        vm.warp(firstSubmitTime);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, "newvid00001");
+        uint256 secondSubmitTime = firstSubmitTime + 48 hours;
+        vm.warp(secondSubmitTime);
+        vm.prank(user1);
+        dao.submitRecommendation(FID_1, "newvid00002");
+
+        uint256 durationDeadline = block.timestamp + 1 hours;
+        bytes memory durationSig1 =
+            generateDurationSignature("newvid00001", 100, durationDeadline, deployerPrivateKey());
+        bytes memory durationSig2 =
+            generateDurationSignature("newvid00002", 150, durationDeadline, deployerPrivateKey());
+        vm.prank(deployer);
+        dao.setVideoDuration(3, 100, durationDeadline, durationSig1);
+        vm.prank(deployer);
+        dao.setVideoDuration(4, 150, durationDeadline, durationSig2);
+
+        vm.prank(user2);
+        dao.approveRecommendation(3, FID_2);
+        vm.prank(user2);
+        dao.approveRecommendation(4, FID_2);
+        vm.prank(deployer);
+        dao.initializeStream();
+
+        // Advance time from initialization
+        vm.warp(block.timestamp + 1205 seconds);
+
+        // Get system health
+        (uint256 timeGapToFill, uint256 songsToProcess, uint256 bigBangsNeeded, uint256 newCurrentSongId) =
+            dao.getSystemHealth();
+        assertEq(timeGapToFill, 1205 seconds, "Time gap to fill should be 1205 seconds");
+
+        // Update system
+        vm.prank(user1);
+        dao.updateSystem(FID_1);
+
+        // Verify current settings equal what was retruned by getSystemHealth
+        assertEq(
+            dao.currentlyPlayingId(), newCurrentSongId, "Currently playing ID should be set to new current song ID"
+        );
+    }
 }

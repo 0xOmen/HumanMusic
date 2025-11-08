@@ -1112,7 +1112,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     /**
      * @dev Get system health - how much time gap needs to be filled
      */
-    function getSystemHealth()
+    function _getSystemHealth()
         external
         view
         returns (
@@ -1123,6 +1123,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         )
     {
         uint256 timeProcessed = 0;
+        uint256 _currentSongIndex = currentSongIndex;
         songsToProcess = 0;
         bigBangsNeeded = 0;
 
@@ -1141,7 +1142,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         }
 
         while (timeProcessed < timeGapToFill) {
-            uint256 nextSongId = songQueue[currentSongIndex];
+            uint256 nextSongId = songQueue[_currentSongIndex];
             uint256 nextDuration = recommendations[nextSongId].duration;
             if(timeProcessed + nextDuration > timeGapToFill) {
                 newCurrentSongId = nextSongId;
@@ -1149,12 +1150,69 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
             }
             timeProcessed += nextDuration;
             songsToProcess++;
-            currentSongIndex++;
-            if(currentSongIndex >= songQueue.length) {
+            _currentSongIndex++;
+            if(_currentSongIndex >= songQueue.length) {
                 bigBangsNeeded++;
-                currentSongIndex = 0;
+                _currentSongIndex = 0;
             }
         }
         return (timeGapToFill, songsToProcess, bigBangsNeeded, newCurrentSongId);
+    }
+
+    function getSystemHealth() public view returns (
+            uint256 timeGapToFill,
+            uint256 songsProcessed,
+            uint256 bigBangsNeeded,
+            uint256 newCurrentSongId
+        ){
+
+        uint256 timeElapsed = block.timestamp - streamStartTime;
+        uint256 currentSongDuration = recommendations[currentlyPlayingId].duration;
+        newCurrentSongId = currentlyPlayingId;
+        songsProcessed = 0;
+        bigBangsNeeded = 0;
+        uint256 totalTimeToFill = 0;
+        uint256 _currentSongIndex = currentSongIndex;
+
+        // If current song has finished, move it to past and start processing
+        if (timeElapsed >= currentSongDuration) {
+            totalTimeToFill = timeElapsed - currentSongDuration;
+            songsProcessed++;
+            _currentSongIndex++;
+        } else {
+            // Current song is still playing, no processing needed
+            return (0, songsProcessed, bigBangsNeeded, currentlyPlayingId);
+        }
+
+        // Iterate through songQueue from currentSongIndex until time gap is filled
+        while (totalTimeToFill > 0) {
+            // Check if we need to perform Big Bang (reached end of queue)
+            if (_currentSongIndex >= songQueue.length) {
+                bigBangsNeeded++;
+                _currentSongIndex = 0;
+            }
+
+            // Ensure we have songs to process
+            if (_currentSongIndex >= songQueue.length) {
+                break; // No songs available even after Big Bang
+            }
+
+            uint256 nextSongId = songQueue[_currentSongIndex];
+            uint256 nextSongDuration = recommendations[nextSongId].duration;
+
+            if (totalTimeToFill >= nextSongDuration) {
+                // This song would have finished in the time gap
+                totalTimeToFill -= nextSongDuration;
+                songsProcessed++;
+                _currentSongIndex++;
+            } else {
+                // This song is currently playing
+                newCurrentSongId = nextSongId;
+                totalTimeToFill = 0;
+                songsProcessed++;
+                break;
+            }
+        }
+        return (timeElapsed, songsProcessed, bigBangsNeeded, newCurrentSongId);
     }
 }
