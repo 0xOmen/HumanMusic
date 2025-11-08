@@ -966,19 +966,11 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     function getGlobalStats()
         external
         view
-        returns (
-            uint256 totalRecommendations,
-            uint256 activeUsers,
-            uint256 currentQueueLength,
-            uint256 totalPlayedSongs
-        )
+        returns (uint256 totalRecommendations, uint256 currentQueueLength, uint256 cycleCount)
     {
         totalRecommendations = nextRecommendationId - 1;
         currentQueueLength = songQueue.length;
-        totalPlayedSongs = currentSongIndex;
-
-        // Note: activeUsers would need more sophisticated tracking in production
-        activeUsers = 0; // Placeholder
+        cycleCount = totalCycleCount;
     }
 
     /**
@@ -1014,12 +1006,12 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
      */
     function getTodaySubmissionsCount() external view returns (uint256) {
         uint256 count = 0;
-        uint256 currentDay = block.timestamp / 1 days;
+        uint256 endTime = block.timestamp - 1 days;
+        uint256 submissionIndex = nextRecommendationId - 1;
 
-        for (uint256 i = 1; i < nextRecommendationId; i++) {
-            if (recommendations[i].submissionTime / 1 days == currentDay) {
-                count++;
-            }
+        while (recommendations[submissionIndex].submissionTime >= endTime) {
+            count++;
+            submissionIndex--;
         }
         return count;
     }
@@ -1125,13 +1117,17 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         view
         returns (
             uint256 timeGapToFill,
-            uint256 availableFutureDuration,
-            uint256 availablePastDuration,
-            bool needsBigBang
+            uint256 songsToProcess,
+            uint256 bigBangsNeeded,
+            uint256 newCurrentSongId
         )
     {
+        uint256 timeProcessed = 0;
+        songsToProcess = 0;
+        bigBangsNeeded = 0;
+
         if (currentlyPlayingId == 0) {
-            return (0, 0, 0, false);
+            return (0, songsToProcess, bigBangsNeeded, 0); // Not initialized
         }
 
         Recommendation memory current = recommendations[currentlyPlayingId];
@@ -1141,63 +1137,24 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
             timeGapToFill = timeElapsed - current.duration;
         } else {
             timeGapToFill = 0;
+            return (timeGapToFill, songsToProcess, bigBangsNeeded, currentlyPlayingId); // No time gap to fill
         }
 
-        // Calculate available duration from current position to end of queue
-        for (uint256 i = currentSongIndex; i < songQueue.length; i++) {
-            availableFutureDuration += recommendations[songQueue[i]].duration;
-        }
-
-        // Calculate available duration for songs that have already played (will cycle back)
-        for (uint256 i = 0; i < currentSongIndex; i++) {
-            availablePastDuration += recommendations[songQueue[i]].duration;
-        }
-
-        needsBigBang = (currentSongIndex >= songQueue.length && timeGapToFill > 0);
-    }
-
-    /**
-     * @dev Preview what updateSystem would do without executing it
-     */
-    function previewSystemUpdate()
-        external
-        view
-        returns (uint256 songsToProcess, uint256 timeToFill, bool willTriggerBigBang, uint256 newCurrentSongId)
-    {
-        if (currentlyPlayingId == 0) return (0, 0, false, 0);
-
-        uint256 timeElapsed = block.timestamp - streamStartTime;
-        uint256 currentSongDuration = recommendations[currentlyPlayingId].duration;
-
-        if (timeElapsed < currentSongDuration) {
-            return (0, 0, false, currentlyPlayingId); // No update needed
-        }
-
-        timeToFill = timeElapsed - currentSongDuration;
-        songsToProcess = 1; // Current song moving to past
-
-        // Simulate processing from currentSongIndex
-        uint256 tempTimeToFill = timeToFill;
-        uint256 simulatedIndex = currentSongIndex + 1; // Start from next song
-
-        while (tempTimeToFill > 0 && simulatedIndex < songQueue.length) {
-            uint256 nextSongId = songQueue[simulatedIndex];
+        while (timeProcessed < timeGapToFill) {
+            uint256 nextSongId = songQueue[currentSongIndex];
             uint256 nextDuration = recommendations[nextSongId].duration;
-
-            if (tempTimeToFill >= nextDuration) {
-                tempTimeToFill -= nextDuration;
-                songsToProcess++;
-                simulatedIndex++;
-            } else {
+            if(timeProcessed + nextDuration > timeGapToFill) {
                 newCurrentSongId = nextSongId;
-                songsToProcess++;
                 break;
             }
+            timeProcessed += nextDuration;
+            songsToProcess++;
+            currentSongIndex++;
+            if(currentSongIndex >= songQueue.length) {
+                bigBangsNeeded++;
+                currentSongIndex = 0;
+            }
         }
-
-        // Check if Big Bang would be triggered
-        if (tempTimeToFill > 0 && simulatedIndex >= songQueue.length) {
-            willTriggerBigBang = true;
-        }
+        return (timeGapToFill, songsToProcess, bigBangsNeeded, newCurrentSongId);
     }
 }
