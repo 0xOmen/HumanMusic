@@ -218,7 +218,8 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         APPROVED, // Approved and added to queue
         FUTURE, // Computed: queued for future play (index > currentSongIndex)
         PRESENT, // Computed: currently playing (index == currentSongIndex)
-        PAST // Computed: has finished playing (index < currentSongIndex)
+        PAST, // Computed: has finished playing (index < currentSongIndex)
+        BANNED // Rejected by reviewer or system
 
     }
 
@@ -252,16 +253,16 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     /// @dev Backend signer address that verifies YouTube video durations
     address public backendSigner;
 
-    mapping(uint256 => Recommendation) public recommendations;
+    mapping(uint256 => Recommendation) public recommendations; // Recommendation ID => Recommendation
     mapping(uint256 => User) public users; // FID => User
     mapping(uint256 => Comment) public comments;
     mapping(uint256 => mapping(uint256 => bool)) public hasVoted; // FID => recommendationId => voted
     mapping(string => bool) public submittedVideoIds; // Prevent duplicate video IDs
     mapping(uint256 => mapping(address => bool)) public userAddressValid; // FID => address => valid
 
-    uint256 public nextRecommendationId = 1;
+    uint256 public nextRecommendationId = 1; // Next recommendation ID to assign, increments by 1
     uint256 public nextCommentId = 1;
-    uint256 public currentlyPlayingId = 0;
+    uint256 public currentlyPlayingId = 0; // ID of the currently playing song
     uint256 public streamStartTime; // When the current song started playing
     uint256 public lastUpdateTime; // Last time updateSystem was called
     uint256 public totalCycleCount = 0; // How many times we've cycled through all content
@@ -289,6 +290,8 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
 
     event RecommendationApproved(uint256 indexed id, uint256 approvedBy);
     event RecommendationRejected(uint256 indexed id, uint256 rejectedBy);
+    event RecommendationBanned(uint256 indexed id);
+    event RecommendationUnbanned(uint256 indexed id);
     event RecommendationTransitioned(uint256 indexed id, RecommendationState newState);
     event VoteCast(uint256 indexed recommendationId, uint256 indexed voterFid, bool isUpvote);
     event CommentAdded(uint256 indexed commentId, uint256 indexed recommendationId, uint256 indexed commenterFid);
@@ -527,7 +530,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         emit VoteCast(_recommendationId, _voterFid, _isUpvote);
 
         // Auto-approve if threshold met
-        if (rec.upvotes >= MIN_UPVOTES_THRESHOLD && rec.upvotes > rec.downvotes) {
+        if (rec.upvotes >= MIN_UPVOTES_THRESHOLD && rec.upvotes > rec.downvotes && rec.duration > 0) {
             _approveRecommendation(_recommendationId);
         }
     }
@@ -547,6 +550,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     function _approveRecommendation(uint256 _recommendationId) internal {
         Recommendation storage rec = recommendations[_recommendationId];
         require(rec.state == RecommendationState.SUBMITTED, "Already processed");
+        require(rec.duration > 0, "Duration not set");
 
         rec.state = RecommendationState.APPROVED;
         rec.scheduledTime = block.timestamp; // Will be properly scheduled when added to queue
@@ -627,6 +631,33 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         rec.duration = _duration;
 
         emit DurationSet(_recommendationId, rec.youtubeVideoId, _duration);
+
+        // Check if has Upvotes to auto approve
+        if (rec.upvotes >= MIN_UPVOTES_THRESHOLD && rec.upvotes > rec.downvotes) {
+            _approveRecommendation(_recommendationId);
+        }
+    }
+
+    /**
+     * @dev Ban a recommendation
+     * @param _recommendationId The recommendation ID to ban
+     */
+    function banRecommendation(uint256 _recommendationId) external onlyOwner validRecommendation(_recommendationId) {
+        Recommendation storage rec = recommendations[_recommendationId];
+        require(rec.state == RecommendationState.SUBMITTED, "Already processed");
+        rec.state = RecommendationState.BANNED;
+        emit RecommendationBanned(_recommendationId);
+    }
+
+    /**
+     * @dev Unban a recommendation
+     * @param _recommendationId The recommendation ID to unban
+     */
+    function unbanRecommendation(uint256 _recommendationId) external onlyOwner validRecommendation(_recommendationId) {
+        Recommendation storage rec = recommendations[_recommendationId];
+        require(rec.state == RecommendationState.BANNED, "Not banned");
+        rec.state = RecommendationState.SUBMITTED;
+        emit RecommendationUnbanned(_recommendationId);
     }
 
     /**

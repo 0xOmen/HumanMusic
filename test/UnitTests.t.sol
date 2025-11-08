@@ -1484,6 +1484,12 @@ contract UnitTests is Test {
         vm.prank(user1);
         dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
+        // Prank deployer and set duration
+        vm.startPrank(deployer);
+        bytes memory signature3 = generateDurationSignature(YOUTUBE_VIDEO_ID, 180, deadline, deployerPrivateKey());
+        dao.setVideoDuration(1, 180, deadline, signature3);
+        vm.stopPrank();
+
         // Give user2 1000 tokens, then make them reviewer
         vm.startPrank(deployer);
         token.transfer(user2, 1000 * 10 ** 18);
