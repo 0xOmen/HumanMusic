@@ -512,40 +512,46 @@ contract UnitTests is Test {
         dao.addUserAddress(FID_1, newAddress);
     }
 
-    // ============ addUserAddressFromOwner TESTS ============
+    // ============ addUserAddressWithSignature TESTS ============
 
     /**
-     * @notice Test that addUserAddressFromOwner can only be called by owner
+     * @notice Test that addUserAddressWithSignature reverts with invalid signature
      */
-    function test_addUserAddressFromOwner_OnlyOwner() public {
+    function test_addUserAddressWithSignature_RevertsWithInvalidSignature() public {
         // Register user1 with FID_1
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
         dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
-        // Try to call from non-owner
+        // Try to add address with invalid signature (signed by non-owner)
         address newAddress = address(0xAAAA);
+        uint256 addDeadline = block.timestamp + 1 hours;
+        bytes memory badSignature = generateRegistrationSignature(FID_1, newAddress, addDeadline, nonOwnerPrivateKey());
+
         vm.prank(nonOwner);
-        vm.expectRevert();
-        dao.addUserAddressFromOwner(FID_1, newAddress);
+        vm.expectRevert("Invalid signature");
+        dao.addUserAddressWithSignature(FID_1, newAddress, addDeadline, badSignature);
     }
 
     /**
-     * @notice Test that addUserAddressFromOwner reverts if user not registered
+     * @notice Test that addUserAddressWithSignature reverts if user not registered
      */
-    function test_addUserAddressFromOwner_RevertsIfUserNotRegistered() public {
+    function test_addUserAddressWithSignature_RevertsIfUserNotRegistered() public {
         // Try to add address for unregistered FID
         address newAddress = address(0xAAAA);
-        vm.prank(deployer);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, newAddress, deadline, deployerPrivateKey());
+
+        vm.prank(nonOwner);
         vm.expectRevert("User not registered");
-        dao.addUserAddressFromOwner(FID_1, newAddress);
+        dao.addUserAddressWithSignature(FID_1, newAddress, deadline, signature);
     }
 
     /**
-     * @notice Test that addUserAddressFromOwner reverts if new address is zero
+     * @notice Test that addUserAddressWithSignature reverts if new address is zero
      */
-    function test_addUserAddressFromOwner_RevertsIfZeroAddress() public {
+    function test_addUserAddressWithSignature_RevertsIfZeroAddress() public {
         // Register user1 with FID_1
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
@@ -553,15 +559,18 @@ contract UnitTests is Test {
         dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Try to add zero address
-        vm.prank(deployer);
+        uint256 addDeadline = block.timestamp + 1 hours;
+        bytes memory addSignature = generateRegistrationSignature(FID_1, address(0), addDeadline, deployerPrivateKey());
+
+        vm.prank(nonOwner);
         vm.expectRevert("Invalid address");
-        dao.addUserAddressFromOwner(FID_1, address(0));
+        dao.addUserAddressWithSignature(FID_1, address(0), addDeadline, addSignature);
     }
 
     /**
-     * @notice Test that addUserAddressFromOwner reverts if address already registered
+     * @notice Test that addUserAddressWithSignature reverts if address already registered
      */
-    function test_addUserAddressFromOwner_RevertsIfAddressAlreadyRegistered() public {
+    function test_addUserAddressWithSignature_RevertsIfAddressAlreadyRegistered() public {
         // Register user1 with FID_1
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
@@ -569,48 +578,84 @@ contract UnitTests is Test {
         dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // user1 is already registered to FID_1, try to add it again
-        vm.prank(deployer);
+        uint256 addDeadline = block.timestamp + 1 hours;
+        bytes memory addSignature = generateRegistrationSignature(FID_1, user1, addDeadline, deployerPrivateKey());
+
+        vm.prank(nonOwner);
         vm.expectRevert("Address already registered to FID");
-        dao.addUserAddressFromOwner(FID_1, user1);
+        dao.addUserAddressWithSignature(FID_1, user1, addDeadline, addSignature);
     }
 
     /**
-     * @notice Test that addUserAddressFromOwner adds address as valid after function call
+     * @notice Test that addUserAddressWithSignature reverts if signature is expired
      */
-    function test_addUserAddressFromOwner_AddsAddressAsValid() public {
+    function test_addUserAddressWithSignature_RevertsIfSignatureExpired() public {
         // Register user1 with FID_1
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
         dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
-        // Add new address as owner
+        // Create signature with deadline in the future, then warp past it
+        address newAddress = address(0xAAAA);
+        uint256 currentTime = block.timestamp;
+        uint256 expiredDeadline = currentTime + 1 hours;
+
+        // Generate signature with deadline in the future
+        bytes memory expiredSignature =
+            generateRegistrationSignature(FID_1, newAddress, expiredDeadline, deployerPrivateKey());
+
+        // Warp time forward so the deadline is in the past
+        vm.warp(currentTime + 2 hours);
+
+        vm.prank(nonOwner);
+        vm.expectRevert("Signature expired");
+        dao.addUserAddressWithSignature(FID_1, newAddress, expiredDeadline, expiredSignature);
+    }
+
+    /**
+     * @notice Test that addUserAddressWithSignature adds address as valid after function call
+     */
+    function test_addUserAddressWithSignature_AddsAddressAsValid() public {
+        // Register user1 with FID_1
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
+        vm.prank(user1);
+        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+
+        // Add new address with valid signature
         address newAddress = address(0xAAAA);
         assertFalse(dao.userAddressValid(FID_1, newAddress), "Address should not be valid before adding");
 
-        vm.prank(deployer);
-        dao.addUserAddressFromOwner(FID_1, newAddress);
+        uint256 addDeadline = block.timestamp + 1 hours;
+        bytes memory addSignature = generateRegistrationSignature(FID_1, newAddress, addDeadline, deployerPrivateKey());
+
+        vm.prank(nonOwner);
+        dao.addUserAddressWithSignature(FID_1, newAddress, addDeadline, addSignature);
 
         // Verify address is now valid
         assertTrue(dao.userAddressValid(FID_1, newAddress), "Address should be valid after adding");
     }
 
     /**
-     * @notice Test that addUserAddressFromOwner emits UserAddressAdded event
+     * @notice Test that addUserAddressWithSignature emits UserAddressAdded event
      */
-    function test_addUserAddressFromOwner_EmitsEvent() public {
+    function test_addUserAddressWithSignature_EmitsEvent() public {
         // Register user1 with FID_1
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
         dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
-        // Add new address as owner
+        // Add new address with valid signature
         address newAddress = address(0xAAAA);
-        vm.prank(deployer);
+        uint256 addDeadline = block.timestamp + 1 hours;
+        bytes memory addSignature = generateRegistrationSignature(FID_1, newAddress, addDeadline, deployerPrivateKey());
+
+        vm.prank(nonOwner);
         vm.expectEmit(true, true, false, false);
         emit UserAddressAdded(FID_1, newAddress);
-        dao.addUserAddressFromOwner(FID_1, newAddress);
+        dao.addUserAddressWithSignature(FID_1, newAddress, addDeadline, addSignature);
     }
 
     // ============ submitRecommendation TESTS ============

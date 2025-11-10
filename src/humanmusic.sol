@@ -268,16 +268,16 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     uint256 public totalCycleCount = 0; // How many times we've cycled through all content
 
     // Token Economics
-    uint256 public constant SUBMISSION_REWARD = 10 * 10 ** 18; // 10 $HUMANMUSIC for submission
-    uint256 public constant UPVOTE_REWARD = 5 * 10 ** 18; // 5 $HUMANMUSIC for receiving upvote
-    uint256 public constant PLAY_REWARD = 50 * 10 ** 18; // 50 $HUMANMUSIC when song plays
-    uint256 public constant VOTER_REWARD = 1 * 10 ** 18; // 1 $HUMANMUSIC for voting
-    uint256 public constant UPDATE_REWARD = 2 * 10 ** 18; // 2 $HUMANMUSIC for calling updateSystem
+    uint256 public SUBMISSION_REWARD = 10 * 10 ** 18; // 10 $HUMANMUSIC for submission
+    uint256 public UPVOTE_REWARD = 5 * 10 ** 18; // 5 $HUMANMUSIC for receiving upvote
+    uint256 public PLAY_REWARD = 50 * 10 ** 18; // 50 $HUMANMUSIC when song plays
+    uint256 public VOTER_REWARD = 1 * 10 ** 18; // 1 $HUMANMUSIC for voting
+    uint256 public UPDATE_REWARD = 2 * 10 ** 18; // 2 $HUMANMUSIC for calling updateSystem
 
     // Governance
-    uint256 public constant VOTING_PERIOD = 24 hours;
-    uint256 public constant MIN_UPVOTES_THRESHOLD = 3;
-    uint256 public constant REVIEWER_TOKEN_REQUIREMENT = 1000 * 10 ** 18; // 1000 $HUMANMUSIC to become reviewer
+    uint256 public VOTING_PERIOD = 24 hours;
+    uint256 public MIN_UPVOTES_THRESHOLD = 3;
+    uint256 public REVIEWER_TOKEN_REQUIREMENT = 1000 * 10 ** 18; // 1000 $HUMANMUSIC to become reviewer
 
     uint256[] public songQueue; // Queue of all approved recommendations
     uint256 public currentSongIndex = 0; // Index of currently playing song in songQueue
@@ -414,16 +414,29 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @dev Add a new address to a user's registered addresses (owner only)
-     * @notice Allows the owner to add an address to an existing User struct
+     * @notice Add a new address to a user's FID using an EIP-712 signature from the owner
      * @notice This is for Clients that have different wallets and addresses for the same FID
-     * @param _fid The Farcaster FID of the user
-     * @param _newAddress The address to add to the user's addresses
+     * @param _fid Farcaster FID of the user
+     * @param _newAddress New address to add to the user's FID
+     * @param _deadline Signature expiration timestamp
+     * @param _signature EIP-712 signature from the owner approving the address addition
      */
-    function addUserAddressFromOwner(uint256 _fid, address _newAddress) external onlyOwner {
+    function addUserAddressWithSignature(
+        uint256 _fid,
+        address _newAddress,
+        uint256 _deadline,
+        bytes calldata _signature
+    ) external {
         require(users[_fid].fid != 0, "User not registered");
         require(_newAddress != address(0), "Invalid address");
         require(!userAddressValid[_fid][_newAddress], "Address already registered to FID");
+        require(block.timestamp <= _deadline, "Signature expired");
+
+        // Verify EIP-712 signature
+        bytes32 structHash = keccak256(abi.encode(USER_REGISTRATION_TYPEHASH, _fid, _newAddress, _deadline));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        address signer = digest.recover(_signature);
+        require(signer == backendSigner, "Invalid signature");
 
         userAddressValid[_fid][_newAddress] = true;
         emit UserAddressAdded(_fid, _newAddress);
@@ -846,10 +859,68 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         require(humanMusicToken.transferFrom(msg.sender, address(this), _amount), "Transfer failed");
     }
 
+    // ============ TOKEN ECONOMICS SETTERS ============
+
     /**
-     * @dev Update the backend signer address (owner only)
-     * @param _newSigner New backend signer address
+     * @notice Set the reward amount for submitting a recommendation
+     * @param _amount New submission reward amount
      */
+    function setSubmissionReward(uint256 _amount) external onlyOwner {
+        SUBMISSION_REWARD = _amount;
+    }
+
+    /**
+     * @notice Set the reward amount for receiving an upvote
+     * @param _amount New upvote reward amount
+     */
+    function setUpvoteReward(uint256 _amount) external onlyOwner {
+        UPVOTE_REWARD = _amount;
+    }
+
+    /**
+     * @notice Set the reward amount when a song plays
+     * @param _amount New play reward amount
+     */
+    function setPlayReward(uint256 _amount) external onlyOwner {
+        PLAY_REWARD = _amount;
+    }
+
+    /**
+     * @notice Set the reward amount for voting on a recommendation
+     * @param _amount New voter reward amount
+     */
+    function setVoterReward(uint256 _amount) external onlyOwner {
+        VOTER_REWARD = _amount;
+    }
+
+    /**
+     * @notice Set the reward amount for calling updateSystem
+     * @param _amount New update reward amount
+     */
+    function setUpdateReward(uint256 _amount) external onlyOwner {
+        UPDATE_REWARD = _amount;
+    }
+
+    // ============ GOVERNANCE SETTER ============
+
+    /**
+     * @notice Set all governance parameters
+     * @param _votingPeriod New voting period in seconds
+     * @param _minUpvotesThreshold New minimum upvotes threshold for auto-approval
+     * @param _reviewerTokenRequirement New token requirement to become a reviewer
+     */
+    function setGovernanceParameters(
+        uint256 _votingPeriod,
+        uint256 _minUpvotesThreshold,
+        uint256 _reviewerTokenRequirement
+    ) external onlyOwner {
+        VOTING_PERIOD = _votingPeriod;
+        MIN_UPVOTES_THRESHOLD = _minUpvotesThreshold;
+        REVIEWER_TOKEN_REQUIREMENT = _reviewerTokenRequirement;
+    }
+
+    // ============ ADMIN FUNCTIONS ============
+
     function setBackendSigner(address _newSigner) external onlyOwner {
         require(_newSigner != address(0), "Invalid signer address");
         address oldSigner = backendSigner;
@@ -1115,12 +1186,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     function _getSystemHealth()
         external
         view
-        returns (
-            uint256 timeGapToFill,
-            uint256 songsToProcess,
-            uint256 bigBangsNeeded,
-            uint256 newCurrentSongId
-        )
+        returns (uint256 timeGapToFill, uint256 songsToProcess, uint256 bigBangsNeeded, uint256 newCurrentSongId)
     {
         uint256 timeProcessed = 0;
         uint256 _currentSongIndex = currentSongIndex;
@@ -1144,14 +1210,14 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         while (timeProcessed < timeGapToFill) {
             uint256 nextSongId = songQueue[_currentSongIndex];
             uint256 nextDuration = recommendations[nextSongId].duration;
-            if(timeProcessed + nextDuration > timeGapToFill) {
+            if (timeProcessed + nextDuration > timeGapToFill) {
                 newCurrentSongId = nextSongId;
                 break;
             }
             timeProcessed += nextDuration;
             songsToProcess++;
             _currentSongIndex++;
-            if(_currentSongIndex >= songQueue.length) {
+            if (_currentSongIndex >= songQueue.length) {
                 bigBangsNeeded++;
                 _currentSongIndex = 0;
             }
@@ -1159,13 +1225,11 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         return (timeGapToFill, songsToProcess, bigBangsNeeded, newCurrentSongId);
     }
 
-    function getSystemHealth() public view returns (
-            uint256 timeGapToFill,
-            uint256 songsProcessed,
-            uint256 bigBangsNeeded,
-            uint256 newCurrentSongId
-        ){
-
+    function getSystemHealth()
+        public
+        view
+        returns (uint256 timeGapToFill, uint256 songsProcessed, uint256 bigBangsNeeded, uint256 newCurrentSongId)
+    {
         uint256 timeElapsed = block.timestamp - streamStartTime;
         uint256 currentSongDuration = recommendations[currentlyPlayingId].duration;
         newCurrentSongId = currentlyPlayingId;
