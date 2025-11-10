@@ -277,6 +277,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     // Governance
     uint256 public VOTING_PERIOD = 24 hours;
     uint256 public MIN_UPVOTES_THRESHOLD = 3;
+    uint256 public MIN_REPUTATION_SCORE = 200;
     uint256 public REVIEWER_TOKEN_REQUIREMENT = 1000 * 10 ** 18; // 1000 $HUMANMUSIC to become reviewer
 
     uint256[] public songQueue; // Queue of all approved recommendations
@@ -789,7 +790,6 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
             emit RecommendationTransitioned(
                 currentlyPlayingId, getRecommendationState(currentlyPlayingId, currentSongIndex)
             );
-            currentlyPlayingId = 0;
         }
     }
 
@@ -829,11 +829,21 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @dev Revoke reviewer privileges
+     * @notice resets the user's Reputation Score to 5
+     */
+    function revokeReviewerRole(uint256 _fid) external onlyOwner {
+        require(users[_fid].fid != 0, "User not registered");
+        users[_fid].isReviewer = false;
+        users[_fid].reputationScore = 5;
+    }
+
+    /**
      * @dev Grant reviewer privileges (requires token holding)
      */
     function autoGrantReviewerRole(uint256 _fid) external {
         require(users[_fid].fid != 0, "User not registered");
-        require(users[_fid].reputationScore >= 200, "Insufficient reputation");
+        require(users[_fid].reputationScore >= MIN_REPUTATION_SCORE, "Insufficient reputation");
         require(users[_fid].tokenBalance >= REVIEWER_TOKEN_REQUIREMENT, "Insufficient tokens");
         users[_fid].isReviewer = true;
     }
@@ -912,10 +922,12 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     function setGovernanceParameters(
         uint256 _votingPeriod,
         uint256 _minUpvotesThreshold,
+        uint256 _minReputationScore,
         uint256 _reviewerTokenRequirement
     ) external onlyOwner {
         VOTING_PERIOD = _votingPeriod;
         MIN_UPVOTES_THRESHOLD = _minUpvotesThreshold;
+        MIN_REPUTATION_SCORE = _minReputationScore;
         REVIEWER_TOKEN_REQUIREMENT = _reviewerTokenRequirement;
     }
 
