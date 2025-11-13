@@ -6,6 +6,7 @@ This directory contains deployment scripts for the HumanMusicDAO contract.
 
 - `Deploy.s.sol` - Main deployment script that supports multiple chains
 - `DeployHelper.sol` - Helper library for deployment operations (optional)
+- `DeploySignatureHelper.s.sol` - Deployment script for SignatureHelper contract (for local signature generation)
 
 ## Supported Chains
 
@@ -128,9 +129,81 @@ After deployment, you can verify the contracts on block explorers:
 
 Add the `--verify` flag to automatically verify contracts on block explorers (requires `ETHERSCAN_API_KEY` in your `.env`).
 
+## SignatureHelper Deployment
+
+The `SignatureHelper` contract is used to generate EIP-712 registration signatures locally for testing purposes.
+
+### Deploy SignatureHelper to Anvil
+
+1. Start Anvil in a separate terminal:
+
+   ```bash
+   anvil
+   ```
+
+2. Deploy the SignatureHelper contract:
+
+   ```bash
+   forge script script/DeploySignatureHelper.s.sol:DeploySignatureHelper \
+     --rpc-url http://localhost:8545 \
+     --broadcast \
+     -vvvv
+   ```
+
+   The script will:
+
+   - Deploy the SignatureHelper contract
+   - Display the domain separator and contract info
+   - Generate an example registration signature
+
+### Generate Registration Signatures
+
+After deployment, you can generate signatures using the script. The script uses Foundry's `vm.sign()` to create EIP-712 signatures.
+
+**Example: Generate a signature with custom parameters**
+
+You can modify the script's `run()` function or create a custom script that calls `generateSignature()`:
+
+```solidity
+// In your script
+bytes memory signature = deploySignatureHelper.generateSignature(
+    fid,           // uint256 - Farcaster ID
+    userAddress,   // address - User's Ethereum address
+    deadline       // uint256 - Signature deadline (unix timestamp)
+);
+```
+
+**Using environment variables:**
+
+You can set a custom private key via environment variable:
+
+```bash
+PRIVATE_KEY=0x... forge script script/DeploySignatureHelper.s.sol:DeploySignatureHelper \
+  --rpc-url http://localhost:8545 \
+  --broadcast \
+  -vvvv
+```
+
+**Default signer:** The script uses Anvil's first account by default (`0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80`).
+
+### Signature Format
+
+The generated signature is returned as a hex string in the format: `r || s || v` (65 bytes total), which can be directly used in your application.
+
+Example output:
+
+```
+==========================================
+SIGNATURE GENERATED:
+==========================================
+Hex: 0x1234567890abcdef...
+==========================================
+```
+
 ## Notes
 
 - For Anvil deployments, a mock token is automatically created
 - For mainnet/testnet deployments, you must have the token contract already deployed
 - The script uses `vm.broadcast()` which requires the `--broadcast` flag
 - Make sure you have enough native tokens (ETH) for gas fees on the target chain
+- **Note:** The `SignatureHelper` contract's `generateRegistrationSignature()` function has an issue - it uses `ECDSA.tryRecover()` incorrectly. The deployment script uses `vm.sign()` which is the correct way to generate signatures in Foundry.
