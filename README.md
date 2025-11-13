@@ -385,6 +385,13 @@ forge test
 
 See `script/README.md` for deployment instructions across multiple chains.
 
+### Verify
+
+```bash
+source .env && forge verify-contract --chain-id 8453 --num-of-optimiza
+tions 200 --watch --constructor-args 0000000000000000000000003e853062407a32c5f5e06be8d36dbce6b7c4da03 --verifier etherscan --etherscan-api-key ${ETHERSCAN_API_KEY} --rpc-url ${BASE_MAINNET_RPC} <contract address > src/humanmusic.sol:HumanMusicDAO
+```
+
 ---
 
 ## License

@@ -84,13 +84,7 @@ forge script script/Deploy.s.sol:Deploy \
 ### Deploy to Base Mainnet
 
 ```bash
-forge script script/Deploy.s.sol:Deploy \
-  --rpc-url $RPC_URL_BASE \
-  --private-key $PRIVATE_KEY \
-  --broadcast \
-  --verify \
-  --slow \
-  -vvvv
+  forge script script/Deploy.s.sol:Deploy --rpc-url ${BASE_MAINNET_RPC} --broadcast --verify --etherscan-api-key ${ETHERSCAN_API_KEY} --account deployer -vvvv
 ```
 
 ### Deploy to Ethereum Mainnet

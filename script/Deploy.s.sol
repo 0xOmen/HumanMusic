@@ -22,7 +22,7 @@ contract Deploy is Script {
     uint256 private constant ETHEREUM_MAINNET_CHAIN_ID = 1;
 
     // Token addresses per chain (set these before deploying to mainnets)
-    address private constant BASE_MAINNET_TOKEN = address(0); // TODO: Set actual token address
+    address private constant BASE_MAINNET_TOKEN = 0x3E853062407A32c5F5E06Be8d36DBCe6b7c4DA03; // Fake HumanMusic token
     address private constant BASE_SEPOLIA_TOKEN = address(0); // TODO: Set actual token address
     address private constant ETHEREUM_MAINNET_TOKEN = address(0); // TODO: Set actual token address
 
