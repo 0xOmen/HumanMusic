@@ -37,9 +37,9 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
  *
  * The stream operates on three temporal states:
  *
- * 1. FUTURE: Approved songs waiting to play (community-voted queue)
+ * 1. FUTURE: Approved songs waiting to play
  * 2. PRESENT: Currently playing song (exactly one at any time)
- * 3. PAST: Songs that have finished playing (historical archive)
+ * 3. PAST: Songs that have finished playing
  *
  * TIME-BASED PROGRESSION:
  * ─────────────────────────
@@ -60,7 +60,7 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
  *
  * 1. Calculates time elapsed since last update
  * 2. Processes all songs that should have played during that gap
- * 3. Moves songs through temporal states to catch up to "present"
+ * 3. Rewards songs that have been played and increments currentSongIndex
  * 4. Rewards the caller for maintaining stream continuity
  *
  * EXAMPLE: 8-HOUR GAP SCENARIO
@@ -76,8 +76,8 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
  *
  * BIG BANG MECHANICS:
  * ───────────────────
- * When FUTURE queue is empty but time needs filling, the system performs
- * a "Big Bang" - moving all PAST songs back to FUTURE, creating an eternal
+ * When songQueue is on its last song but time needs filling, the system performs
+ * a "Big Bang" - resetting the song queue, creating an eternal
  * loop. The music never dies.
  *
  * • `_bigBang()` automatically triggers when needed
@@ -102,7 +102,7 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
  * ─────────────────────
  * • Must be exactly 11 characters (YouTube standard)
  * • No duplicates allowed across all submissions
- * • Backend sets duration after YouTube API verification
+ * • Backend sets duration after YouTube API verification and ensures playback is enabled
  *
  * COMMUNITY GOVERNANCE:
  * ═══════════════════════════════════════════════════════════════════════════
@@ -220,7 +220,6 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         PRESENT, // Computed: currently playing (index == currentSongIndex)
         PAST, // Computed: has finished playing (index < currentSongIndex)
         BANNED // Rejected by reviewer or system
-
     }
 
     struct User {
