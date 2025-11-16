@@ -306,6 +306,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     event StreamInitialized(uint256 indexed firstSongId, uint256 startTime);
     event DurationSet(uint256 indexed recommendationId, string youtubeVideoId, uint256 duration);
     event BackendSignerUpdated(address indexed oldSigner, address indexed newSigner);
+    event SongsRemovedFromQueue(uint256 indexed songsRemoved);
 
     // ============ MODIFIERS ============
 
@@ -790,6 +791,47 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
                 currentlyPlayingId, getRecommendationState(currentlyPlayingId, currentSongIndex)
             );
         }
+    }
+
+    /**
+     * @dev Remove songs from the queue by index and replace with las song in queue
+     * @notice This will reorder the array.
+     * @notice must submit a list ordered from low to high, do not duplicate indices
+     * @param indicesToRemove Array of indices to remove
+     */
+    function removeSongsFromQueue(uint256[] calldata indicesToRemove) external onlyOwner {
+        require(indicesToRemove.length > 0, "No indices provided");
+        require(songQueue.length > 0, "Queue is empty");
+
+        uint256 queueLength = songQueue.length;
+        uint256 lastIndex = queueLength - 1;
+
+        for (uint256 i = 0; i < indicesToRemove.length; i++) {
+            uint256 indexToRemove = indicesToRemove[i];
+            // Get songID at index position to reset
+            uint256 songIdToReset = songQueue[indexToRemove];
+            // Get Youtube Video Id of songIdToReset
+            string memory youtubeVideoId = recommendations[songIdToReset].youtubeVideoId;
+
+            // Validate index
+            require(indexToRemove < queueLength, "Index out of bounds");
+
+            // If removing the last element, just pop
+            if (indexToRemove == lastIndex) {
+                songQueue.pop();
+                lastIndex--;
+                queueLength--;
+            } else {
+                // Swap with last element and pop
+                songQueue[indexToRemove] = songQueue[lastIndex];
+                songQueue.pop();
+                lastIndex--;
+                queueLength--;
+            }
+            submittedVideoIds[youtubeVideoId] = false;
+        }
+
+        emit SongsRemovedFromQueue(indicesToRemove.length);
     }
 
     /**
