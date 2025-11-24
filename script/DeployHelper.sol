@@ -36,7 +36,7 @@ library DeployHelper {
      * @return manager The deployed Manager contract address
      */
     function deployManager(address daoAddress) external returns (address manager) {
-        HumanMusicManager managerContract = new HumanMusicManager(daoAddress);
+        HumanMusicManager managerContract = new HumanMusicManager(daoAddress, 0, 600);
         return address(managerContract);
     }
 }

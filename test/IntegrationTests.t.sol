@@ -82,7 +82,7 @@ contract IntegrationTests is Test {
         dao = new HumanMusicDAO(address(token));
 
         // Deploy Manager
-        manager = new HumanMusicManager(address(dao));
+        manager = new HumanMusicManager(address(dao), 0, 600);
 
         // Set manager contract address in DAO
         dao.setManagerContract(address(manager));
@@ -207,9 +207,9 @@ contract IntegrationTests is Test {
         manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
         vm.prank(user2);
-        dao.submitRecommendation(FID_2, "testvid0014");
+        manager.submitRecommendation(FID_2, "testvid0014");
 
         // Give user2 1000 tokens, then make them reviewer
         vm.startPrank(deployer);
@@ -227,9 +227,9 @@ contract IntegrationTests is Test {
         bytes memory durationSig2 =
             generateDurationSignature("testvid0014", 180, durationDeadline, deployerPrivateKey());
         vm.prank(deployer);
-        dao.setVideoDuration(1, 180, durationDeadline, durationSig1);
+        manager.setVideoDuration(1, 180, durationDeadline, durationSig1);
         vm.prank(deployer);
-        dao.setVideoDuration(2, 180, durationDeadline, durationSig2);
+        manager.setVideoDuration(2, 180, durationDeadline, durationSig2);
 
         vm.prank(deployer);
         dao.grantReviewerRole(FID_2);
@@ -491,12 +491,12 @@ contract IntegrationTests is Test {
         // Submit and approve a second song
         vm.warp(block.timestamp + 25 hours);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, "newvid00001");
+        manager.submitRecommendation(FID_1, "newvid00001");
 
         uint256 durationDeadline = block.timestamp + 1 hours;
         bytes memory durationSig = generateDurationSignature("newvid00001", 200, durationDeadline, deployerPrivateKey());
         vm.prank(deployer);
-        dao.setVideoDuration(3, 200, durationDeadline, durationSig);
+        manager.setVideoDuration(3, 200, durationDeadline, durationSig);
 
         vm.prank(user2);
         dao.approveRecommendation(3, FID_2);
@@ -521,11 +521,11 @@ contract IntegrationTests is Test {
         // Submit and approve a second song (need to advance 48 hours for new submission)
         vm.warp(initTime + 48 hours);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, "newvid00001");
+        manager.submitRecommendation(FID_1, "newvid00001");
         uint256 durationDeadline = block.timestamp + 1 hours;
         bytes memory durationSig = generateDurationSignature("newvid00001", 200, durationDeadline, deployerPrivateKey());
         vm.prank(deployer);
-        dao.setVideoDuration(3, 200, durationDeadline, durationSig);
+        manager.setVideoDuration(3, 200, durationDeadline, durationSig);
 
         vm.prank(user2);
         dao.approveRecommendation(3, FID_2);
@@ -578,11 +578,11 @@ contract IntegrationTests is Test {
         uint256 firstSubmitTime = block.timestamp + 48 hours;
         vm.warp(firstSubmitTime);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, "newvid00001");
+        manager.submitRecommendation(FID_1, "newvid00001");
         uint256 secondSubmitTime = firstSubmitTime + 48 hours;
         vm.warp(secondSubmitTime);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, "newvid00002");
+        manager.submitRecommendation(FID_1, "newvid00002");
 
         uint256 durationDeadline = block.timestamp + 1 hours;
         bytes memory durationSig1 =
@@ -590,9 +590,9 @@ contract IntegrationTests is Test {
         bytes memory durationSig2 =
             generateDurationSignature("newvid00002", 150, durationDeadline, deployerPrivateKey());
         vm.prank(deployer);
-        dao.setVideoDuration(3, 100, durationDeadline, durationSig1);
+        manager.setVideoDuration(3, 100, durationDeadline, durationSig1);
         vm.prank(deployer);
-        dao.setVideoDuration(4, 150, durationDeadline, durationSig2);
+        manager.setVideoDuration(4, 150, durationDeadline, durationSig2);
 
         vm.prank(user2);
         dao.approveRecommendation(3, FID_2);
@@ -650,11 +650,11 @@ contract IntegrationTests is Test {
         uint256 firstSubmitTime = block.timestamp + 48 hours;
         vm.warp(firstSubmitTime);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, "newvid00001");
+        manager.submitRecommendation(FID_1, "newvid00001");
         uint256 secondSubmitTime = firstSubmitTime + 48 hours;
         vm.warp(secondSubmitTime);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, "newvid00002");
+        manager.submitRecommendation(FID_1, "newvid00002");
 
         uint256 durationDeadline = block.timestamp + 1 hours;
         bytes memory durationSig1 =
@@ -662,9 +662,9 @@ contract IntegrationTests is Test {
         bytes memory durationSig2 =
             generateDurationSignature("newvid00002", 150, durationDeadline, deployerPrivateKey());
         vm.prank(deployer);
-        dao.setVideoDuration(3, 100, durationDeadline, durationSig1);
+        manager.setVideoDuration(3, 100, durationDeadline, durationSig1);
         vm.prank(deployer);
-        dao.setVideoDuration(4, 150, durationDeadline, durationSig2);
+        manager.setVideoDuration(4, 150, durationDeadline, durationSig2);
 
         vm.prank(user2);
         dao.approveRecommendation(3, FID_2);

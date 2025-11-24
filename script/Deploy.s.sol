@@ -21,6 +21,8 @@ contract Deploy is Script {
     uint256 private constant BASE_MAINNET_CHAIN_ID = 8453;
     uint256 private constant BASE_SEPOLIA_CHAIN_ID = 84532;
     uint256 private constant ETHEREUM_MAINNET_CHAIN_ID = 1;
+    uint256 private constant MINIMUM_DURATION = 0;
+    uint256 private constant MAXIMUM_DURATION = 600;
 
     // Token addresses per chain (set these before deploying to mainnets)
     address private constant BASE_MAINNET_TOKEN = 0x3E853062407A32c5F5E06Be8d36DBCe6b7c4DA03; // Fake HumanMusic token
@@ -122,7 +124,7 @@ contract Deploy is Script {
     function deployManager(address dao) internal returns (address) {
         console.log("Deploying HumanMusicManager...");
         vm.broadcast();
-        HumanMusicManager manager = new HumanMusicManager(dao);
+        HumanMusicManager manager = new HumanMusicManager(dao, MINIMUM_DURATION, MAXIMUM_DURATION);
         console.log("HumanMusicManager deployed at:", address(manager));
         return address(manager);
     }

@@ -80,7 +80,7 @@ contract UnitTests is Test {
         dao = new HumanMusicDAO(address(token));
 
         // Deploy Manager
-        manager = new HumanMusicManager(address(dao));
+        manager = new HumanMusicManager(address(dao), 0, 600);
 
         // Set manager contract address in DAO
         dao.setManagerContract(address(manager));
@@ -675,7 +675,7 @@ contract UnitTests is Test {
         // Try to submit without registering
         vm.prank(user1);
         vm.expectRevert("User not registered");
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
     }
 
     /**
@@ -691,12 +691,12 @@ contract UnitTests is Test {
         // Try with 10 characters
         vm.prank(user1);
         vm.expectRevert("YouTube video ID must be 11 characters");
-        dao.submitRecommendation(FID_1, "rs6Y4kZ8qt");
+        manager.submitRecommendation(FID_1, "rs6Y4kZ8qt");
 
         // Try with 12 characters
         vm.prank(user1);
         vm.expectRevert("YouTube video ID must be 11 characters");
-        dao.submitRecommendation(FID_1, "rs6Y4kZ8qtwx");
+        manager.submitRecommendation(FID_1, "rs6Y4kZ8qtwx");
     }
 
     /**
@@ -714,14 +714,14 @@ contract UnitTests is Test {
 
         // Submit first time
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         //advance by 48 hours
         vm.warp(block.timestamp + 48 hours);
         // Try to submit same video again
         vm.prank(user1);
         vm.expectRevert("Video already submitted");
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
     }
 
     /**
@@ -739,12 +739,12 @@ contract UnitTests is Test {
 
         // Submit first video
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Try to submit another video on same day
         vm.prank(user1);
         vm.expectRevert("Can only submit one video per day");
-        dao.submitRecommendation(FID_1, "abcdefghijk");
+        manager.submitRecommendation(FID_1, "abcdefghijk");
     }
 
     /**
@@ -765,7 +765,7 @@ contract UnitTests is Test {
 
         // Submit recommendation with unique video ID
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Check ID incremented
         assertEq(dao.nextRecommendationId(), initialId + 1, "Recommendation ID should be incremented");
@@ -786,7 +786,7 @@ contract UnitTests is Test {
 
         // Submit recommendation with unique video ID
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Check recommendation data
         (
@@ -838,7 +838,7 @@ contract UnitTests is Test {
 
         // Submit recommendation
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Check video is now submitted
         assertTrue(dao.isVideoSubmitted(YOUTUBE_VIDEO_ID), "Video should be submitted");
@@ -863,7 +863,7 @@ contract UnitTests is Test {
 
         // Submit recommendation with unique video ID
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Check submission count incremented
         (,,, submissionCount,,,,,,) = getUserData(FID_1);
@@ -891,7 +891,7 @@ contract UnitTests is Test {
 
         // Submit recommendation with unique video ID
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Check last submission day updated
         (,,,,, lastSubmissionDay,,,,) = getUserData(FID_1);
@@ -917,7 +917,7 @@ contract UnitTests is Test {
 
         // Submit recommendation with unique video ID
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Check token balance increased
         (,,,,,,, tokenBalance, isReviewer, reputationScore) = getUserData(FID_1);
@@ -941,7 +941,7 @@ contract UnitTests is Test {
         vm.prank(user1);
         vm.expectEmit(true, true, false, true);
         emit RecommendationSubmitted(1, FID_1, YOUTUBE_VIDEO_ID, "", COUNTRY_1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
     }
 
     // ============ submitRecommendationFromCast TESTS ============
@@ -962,7 +962,7 @@ contract UnitTests is Test {
         // Try to call from non-owner
         vm.prank(nonOwner);
         vm.expectRevert();
-        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+        manager.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
     }
 
     /**
@@ -971,7 +971,7 @@ contract UnitTests is Test {
     function test_submitRecommendationFromCast_RevertsIfUserNotRegistered() public {
         vm.prank(deployer);
         vm.expectRevert("User not registered");
-        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+        manager.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
     }
 
     /**
@@ -990,7 +990,7 @@ contract UnitTests is Test {
         // Try with 10 characters
         vm.prank(deployer);
         vm.expectRevert("YouTube video ID must be 11 characters");
-        dao.submitRecommendationFromCast(FID_1, "rs6Y4kZ8qt", CAST_HASH);
+        manager.submitRecommendationFromCast(FID_1, "rs6Y4kZ8qt", CAST_HASH);
     }
 
     /**
@@ -1008,12 +1008,12 @@ contract UnitTests is Test {
 
         // Submit first time via direct submission
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Try to submit same video again via cast
         vm.prank(deployer);
         vm.expectRevert("Video already submitted");
-        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+        manager.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
     }
 
     /**
@@ -1031,12 +1031,12 @@ contract UnitTests is Test {
 
         // Submit first video via direct submission
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Try to submit another video via cast on same day
         vm.prank(deployer);
         vm.expectRevert("Can only submit one video per day");
-        dao.submitRecommendationFromCast(FID_1, "abcdefghijk", CAST_HASH);
+        manager.submitRecommendationFromCast(FID_1, "abcdefghijk", CAST_HASH);
     }
 
     /**
@@ -1056,7 +1056,7 @@ contract UnitTests is Test {
 
         // Submit recommendation from cast with unique video ID
         vm.prank(deployer);
-        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+        manager.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
 
         // Check ID incremented
         assertEq(dao.nextRecommendationId(), initialId + 1, "Recommendation ID should be incremented");
@@ -1077,7 +1077,7 @@ contract UnitTests is Test {
 
         // Submit recommendation from cast with unique video ID
         vm.prank(deployer);
-        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+        manager.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
 
         // Check recommendation data
         (
@@ -1129,7 +1129,7 @@ contract UnitTests is Test {
 
         // Submit recommendation from cast
         vm.prank(deployer);
-        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+        manager.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
 
         // Check video is now submitted
         assertTrue(dao.isVideoSubmitted(YOUTUBE_VIDEO_ID), "Video should be submitted");
@@ -1154,7 +1154,7 @@ contract UnitTests is Test {
 
         // Submit recommendation from cast with unique video ID
         vm.prank(deployer);
-        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+        manager.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
 
         // Check submission count incremented
         (,,, submissionCount,,,,,,) = getUserData(FID_1);
@@ -1182,7 +1182,7 @@ contract UnitTests is Test {
 
         // Submit recommendation from cast with unique video ID
         vm.prank(deployer);
-        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+        manager.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
 
         // Check last submission day updated
         (,,,,, lastSubmissionDay,,,,) = getUserData(FID_1);
@@ -1208,7 +1208,7 @@ contract UnitTests is Test {
 
         // Submit recommendation from cast with unique video ID
         vm.prank(deployer);
-        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+        manager.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
 
         // Check token balance increased
         (,,,,,,, tokenBalance, isReviewer, reputationScore) = getUserData(FID_1);
@@ -1232,7 +1232,7 @@ contract UnitTests is Test {
         vm.prank(deployer);
         vm.expectEmit(true, true, false, true);
         emit RecommendationSubmitted(1, FID_1, YOUTUBE_VIDEO_ID, CAST_HASH, COUNTRY_1);
-        dao.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
+        manager.submitRecommendationFromCast(FID_1, YOUTUBE_VIDEO_ID, CAST_HASH);
     }
 
     // ============ voteOnRecommendation TESTS ============
@@ -1249,7 +1249,7 @@ contract UnitTests is Test {
 
         vm.warp(block.timestamp + 25 hours);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Try to vote without registering user2
         vm.prank(user2);
@@ -1292,7 +1292,7 @@ contract UnitTests is Test {
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Get submission time
         (,,,,, uint256 duration, uint256 submissionTime,,,,,,) = dao.recommendations(1);
@@ -1322,7 +1322,7 @@ contract UnitTests is Test {
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Vote first time
         vm.prank(user2);
@@ -1347,7 +1347,7 @@ contract UnitTests is Test {
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Try to vote on own submission
         vm.prank(user1);
@@ -1371,7 +1371,7 @@ contract UnitTests is Test {
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Check hasVoted is false initially
         assertFalse(dao.hasVoted(FID_2, 1), "Should not have voted initially");
@@ -1400,7 +1400,7 @@ contract UnitTests is Test {
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Get initial state
         (,,,,,,,,, uint256 upvotes, uint256 downvotes,,) = dao.recommendations(1);
@@ -1446,7 +1446,7 @@ contract UnitTests is Test {
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Get initial reputation
         (,,,,,,, uint256 tokenBalance,, uint256 reputationScore) = getUserData(FID_1);
@@ -1486,7 +1486,7 @@ contract UnitTests is Test {
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Vote
         vm.prank(user2);
@@ -1512,7 +1512,7 @@ contract UnitTests is Test {
 
         vm.warp(block.timestamp + 25 hours);
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Try to approve without being reviewer
         vm.prank(user2);
@@ -1535,12 +1535,12 @@ contract UnitTests is Test {
         manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Prank deployer and set duration
         vm.startPrank(deployer);
         bytes memory signature3 = generateDurationSignature(YOUTUBE_VIDEO_ID, 180, deadline, deployerPrivateKey());
-        dao.setVideoDuration(1, 180, deadline, signature3);
+        manager.setVideoDuration(1, 180, deadline, signature3);
         vm.stopPrank();
 
         // Give user2 1000 tokens, then make them reviewer
@@ -1623,7 +1623,7 @@ contract UnitTests is Test {
         manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Register user2 but don't make them a reviewer (use current timestamp for deadline)
         uint256 currentTime = block.timestamp;
@@ -1653,9 +1653,9 @@ contract UnitTests is Test {
         manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
         vm.prank(user2);
-        dao.submitRecommendation(FID_2, "testvid0014");
+        manager.submitRecommendation(FID_2, "testvid0014");
 
         // Give user2 1000 tokens, then make them reviewer
         vm.startPrank(deployer);
@@ -1731,7 +1731,7 @@ contract UnitTests is Test {
         bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 180, deadline, deployerPrivateKey());
 
         vm.expectRevert("Invalid recommendation ID");
-        dao.setVideoDuration(999, 180, deadline, signature);
+        manager.setVideoDuration(999, 180, deadline, signature);
     }
 
     /**
@@ -1744,7 +1744,7 @@ contract UnitTests is Test {
         bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 0, deadline, deployerPrivateKey());
 
         vm.expectRevert("Duration must be 1-600 seconds");
-        dao.setVideoDuration(1, 0, deadline, signature);
+        manager.setVideoDuration(1, 0, deadline, signature);
     }
 
     /**
@@ -1757,7 +1757,7 @@ contract UnitTests is Test {
         bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 601, deadline, deployerPrivateKey());
 
         vm.expectRevert("Duration must be 1-600 seconds");
-        dao.setVideoDuration(1, 601, deadline, signature);
+        manager.setVideoDuration(1, 601, deadline, signature);
     }
 
     /**
@@ -1770,13 +1770,13 @@ contract UnitTests is Test {
         bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 180, deadline, deployerPrivateKey());
 
         // Set duration first time
-        dao.setVideoDuration(1, 180, deadline, signature);
+        manager.setVideoDuration(1, 180, deadline, signature);
 
         // Try to set again
         uint256 newDeadline = block.timestamp + 1 hours;
         bytes memory signature2 = generateDurationSignature(YOUTUBE_VIDEO_ID, 200, newDeadline, deployerPrivateKey());
         vm.expectRevert("Duration already set");
-        dao.setVideoDuration(1, 200, newDeadline, signature2);
+        manager.setVideoDuration(1, 200, newDeadline, signature2);
     }
 
     /**
@@ -1795,7 +1795,7 @@ contract UnitTests is Test {
         bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 180, deadline, deployerPrivateKey());
 
         vm.expectRevert("Recommendation not active");
-        dao.setVideoDuration(1, 180, deadline, signature);
+        manager.setVideoDuration(1, 180, deadline, signature);
     }
 
     /**
@@ -1809,7 +1809,7 @@ contract UnitTests is Test {
         bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 180, deadline, nonOwnerPrivateKey());
 
         vm.expectRevert("Invalid signature");
-        dao.setVideoDuration(1, 180, deadline, signature);
+        manager.setVideoDuration(1, 180, deadline, signature);
     }
 
     /**
@@ -1842,7 +1842,7 @@ contract UnitTests is Test {
         // Set duration
         vm.expectEmit(true, false, false, false);
         emit DurationSet(1, YOUTUBE_VIDEO_ID, 180);
-        dao.setVideoDuration(1, 180, deadline, signature);
+        manager.setVideoDuration(1, 180, deadline, signature);
 
         // Check duration is set
         (
@@ -1966,7 +1966,7 @@ contract UnitTests is Test {
         manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         vm.prank(user1);
-        dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
+        manager.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
 
         // Give user2 1000 tokens, then make them reviewer
         vm.startPrank(deployer);

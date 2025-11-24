@@ -76,6 +76,9 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
         bool isActive;
     }
 
+    uint256 public minimumDuration;
+    uint256 public maximumDuration;
+
     event RecommendationSubmitted(
         uint256 indexed id, uint256 indexed submitterFid, string youtubeVideoId, string castHash, string country
     );
@@ -132,8 +135,18 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
 
     // ============ CONSTRUCTOR ============
 
-    constructor(address _humanMusicDAO) Ownable(msg.sender) {
+    constructor(address _humanMusicDAO, uint256 _minimumDuration, uint256 _maximumDuration) Ownable(msg.sender) {
+        minimumDuration = _minimumDuration;
+        maximumDuration = _maximumDuration;
         humanMusicDAO = HumanMusicDAO(_humanMusicDAO);
+    }
+
+    function setMinimumDuration(uint256 _minimumDuration) external onlyOwner {
+        minimumDuration = _minimumDuration;
+    }
+
+    function setMaximumDuration(uint256 _maximumDuration) external onlyOwner {
+        maximumDuration = _maximumDuration;
     }
 
     // ============ CORE FUNCTIONS ============
@@ -221,5 +234,118 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
 
         HumanMusicDAO(humanMusicDAO).setUserAddressValid(_fid, _newAddress, true);
         emit UserAddressAdded(_fid, _newAddress);
+    }
+
+    /**
+     * @dev Submit a new music recommendation (direct via miniapp)
+     */
+    function submitRecommendation(uint256 _submitterFid, string memory _youtubeVideoId)
+        external
+        onlyRegisteredUser(_submitterFid)
+    {
+        _submitRecommendationInternal(_submitterFid, _youtubeVideoId, "");
+    }
+
+    /**
+     * @dev Submit a recommendation from a Farcaster cast (backend only)
+     */
+    function submitRecommendationFromCast(uint256 _submitterFid, string memory _youtubeVideoId, string memory _castHash)
+        external
+    {
+        require(msg.sender == HumanMusicDAO(humanMusicDAO).getBackendSigner(), "Only backend can submit from cast");
+        (uint256 fid,,,,,,,,,) = HumanMusicDAO(humanMusicDAO).users(_submitterFid);
+        require(fid != 0, "User not registered");
+        _submitRecommendationInternal(_submitterFid, _youtubeVideoId, _castHash);
+    }
+
+    /**
+     * @dev Internal function to handle both direct and cast submissions
+     */
+    function _submitRecommendationInternal(
+        uint256 _submitterFid,
+        string memory _youtubeVideoId,
+        string memory _castHash
+    ) internal nonReentrant {
+        require(bytes(_youtubeVideoId).length == 11, "YouTube video ID must be 11 characters");
+        require(!HumanMusicDAO(humanMusicDAO).submittedVideoIds(_youtubeVideoId), "Video already submitted");
+
+        (uint256 fid,, string memory country, uint256 submissionCount,, uint256 lastSubmissionDay,,,,) =
+            HumanMusicDAO(humanMusicDAO).users(_submitterFid);
+        uint256 currentDay = block.timestamp / 1 days;
+        require(lastSubmissionDay < currentDay, "Can only submit one video per day");
+
+        uint256 recommendationId = HumanMusicDAO(humanMusicDAO).nextRecommendationId();
+        HumanMusicDAO(humanMusicDAO).setNextRecommendationId(recommendationId + 1);
+
+        HumanMusicDAO(humanMusicDAO)
+            .addRecommendation(recommendationId, _submitterFid, _youtubeVideoId, _castHash, country, 0);
+
+        HumanMusicDAO(humanMusicDAO).setVideoSubmissionStatus(_youtubeVideoId, true);
+        HumanMusicDAO(humanMusicDAO).updateUserSubmissions(_submitterFid, submissionCount + 1, currentDay);
+
+        emit RecommendationSubmitted(recommendationId, _submitterFid, _youtubeVideoId, _castHash, country);
+
+        // Reward user for submission
+        HumanMusicDAO(humanMusicDAO)
+            .rewardUser(_submitterFid, HumanMusicDAO(humanMusicDAO).SUBMISSION_REWARD(), "submission");
+    }
+
+    /**
+     * @dev Set video duration with EIP-712 signature verification
+     * @notice Only backend can set duration after YouTube API verification
+     * @param _recommendationId The recommendation ID to set duration for
+     * @param _duration Duration in seconds (1-600)
+     * @param _deadline Signature expiration timestamp
+     * @param _signature EIP-712 signature from backend signer
+     */
+    function setVideoDuration(
+        uint256 _recommendationId,
+        uint256 _duration,
+        uint256 _deadline,
+        bytes calldata _signature
+    ) external {
+        require(
+            _recommendationId > 0 && _recommendationId < HumanMusicDAO(humanMusicDAO).nextRecommendationId(),
+            "Invalid recommendation ID"
+        );
+        require(_duration > minimumDuration && _duration <= maximumDuration, "Duration must be 1-600 seconds");
+        require(block.timestamp <= _deadline, "Signature expired");
+
+        (
+            uint256 id,,
+            string memory youtubeVideoId,,,
+            uint256 duration,,,,
+            uint256 upvotes,
+            uint256 downvotes,,
+            bool isActive
+        ) = HumanMusicDAO(humanMusicDAO).recommendations(_recommendationId);
+        require(duration == 0, "Duration already set");
+        require(isActive, "Recommendation not active");
+
+        // Verify EIP-712 signature
+        bytes32 structHash = keccak256(
+            abi.encode(
+                HumanMusicDAO(humanMusicDAO).getDurationVerificationTypehash(),
+                keccak256(bytes(youtubeVideoId)),
+                _duration,
+                _deadline
+            )
+        );
+
+        bytes32 digest =
+            keccak256(abi.encodePacked("\x19\x01", HumanMusicDAO(humanMusicDAO).getDomainSeparator(), structHash));
+
+        address signer = digest.recover(_signature);
+        require(signer == HumanMusicDAO(humanMusicDAO).getBackendSigner(), "Invalid signature");
+
+        // Set the verified duration
+        HumanMusicDAO(humanMusicDAO).setRecommendationDuration(_recommendationId, _duration);
+
+        emit DurationSet(_recommendationId, youtubeVideoId, _duration);
+
+        // Check if has Upvotes to auto approve
+        if (upvotes >= HumanMusicDAO(humanMusicDAO).MIN_UPVOTES_THRESHOLD() && upvotes > downvotes) {
+            HumanMusicDAO(humanMusicDAO).approveRecommendation(_recommendationId);
+        }
     }
 }

@@ -17,6 +17,8 @@ contract DeploymentTest is Test {
     HumanMusicToken public token;
     address public deployer;
     address public owner;
+    uint256 public minimumDuration = 0;
+    uint256 public maximumDuration = 600;
 
     // EIP-712 constants
     bytes32 private constant DOMAIN_TYPEHASH =
@@ -36,7 +38,7 @@ contract DeploymentTest is Test {
         dao = new HumanMusicDAO(address(token));
 
         // Deploy Manager
-        manager = new HumanMusicManager(address(dao));
+        manager = new HumanMusicManager(address(dao), minimumDuration, maximumDuration);
 
         // Set manager contract address in DAO
         dao.setManagerContract(address(manager));
@@ -129,7 +131,7 @@ contract DeploymentTest is Test {
         assertNotEq(address(daoZero), address(0), "DAO should still be deployed");
 
         // Deploy manager for the zero token DAO
-        HumanMusicManager managerZero = new HumanMusicManager(address(daoZero));
+        HumanMusicManager managerZero = new HumanMusicManager(address(daoZero), minimumDuration, maximumDuration);
         assertEq(address(managerZero.humanMusicDAO()), address(daoZero), "Manager should reference DAO");
     }
 
@@ -144,7 +146,7 @@ contract DeploymentTest is Test {
         HumanMusicDAO newDao = new HumanMusicDAO(address(newToken));
 
         // Deploy Manager
-        HumanMusicManager newManager = new HumanMusicManager(address(newDao));
+        HumanMusicManager newManager = new HumanMusicManager(address(newDao), minimumDuration, maximumDuration);
 
         // Set manager contract address in DAO
         newDao.setManagerContract(address(newManager));
@@ -173,7 +175,7 @@ contract DeploymentTest is Test {
 
         // Deploy Manager
         vm.prank(newDeployer);
-        HumanMusicManager newManager = new HumanMusicManager(address(newDao));
+        HumanMusicManager newManager = new HumanMusicManager(address(newDao), minimumDuration, maximumDuration);
 
         // Set manager contract address in DAO
         vm.prank(newDeployer);
@@ -203,7 +205,7 @@ contract DeploymentTest is Test {
         // Deploy two DAOs on the same chain
         HumanMusicToken token2 = new HumanMusicToken();
         HumanMusicDAO dao2 = new HumanMusicDAO(address(token2));
-        HumanMusicManager manager2 = new HumanMusicManager(address(dao2));
+        HumanMusicManager manager2 = new HumanMusicManager(address(dao2), minimumDuration, maximumDuration);
         dao2.setManagerContract(address(manager2));
 
         (bytes32 domain1,,, uint256 chainId1, address contract1) = dao.getDomainInfo();

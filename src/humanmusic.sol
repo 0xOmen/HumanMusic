@@ -389,54 +389,25 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         userAddressValid[_fid][_registeredAddress] = _isValid;
     }
 
-    // ============ FUNCTIONS ============
-
-    /**
-     * @dev Submit a new music recommendation (direct via miniapp)
-     */
-    function submitRecommendation(uint256 _submitterFid, string memory _youtubeVideoId)
-        external
-        onlyRegisteredUser(_submitterFid)
-        nonReentrant
-    {
-        _submitRecommendationInternal(_submitterFid, _youtubeVideoId, "");
+    function setNextRecommendationId(uint256 _nextRecommendationId) external onlyManagerContract {
+        nextRecommendationId = _nextRecommendationId;
     }
 
-    /**
-     * @dev Submit a recommendation from a Farcaster cast (backend only)
-     */
-    function submitRecommendationFromCast(uint256 _submitterFid, string memory _youtubeVideoId, string memory _castHash)
-        external
-    {
-        require(msg.sender == backendSigner, "Only backend can submit from cast");
-        require(users[_submitterFid].fid != 0, "User not registered");
-        _submitRecommendationInternal(_submitterFid, _youtubeVideoId, _castHash);
-    }
-
-    /**
-     * @dev Internal function to handle both direct and cast submissions
-     */
-    function _submitRecommendationInternal(
+    function addRecommendation(
+        uint256 _id,
         uint256 _submitterFid,
         string memory _youtubeVideoId,
-        string memory _castHash
-    ) internal {
-        require(bytes(_youtubeVideoId).length == 11, "YouTube video ID must be 11 characters");
-        require(!submittedVideoIds[_youtubeVideoId], "Video already submitted");
-
-        User storage user = users[_submitterFid];
-        uint256 currentDay = block.timestamp / 1 days;
-        require(user.lastSubmissionDay < currentDay, "Can only submit one video per day");
-
-        uint256 recommendationId = nextRecommendationId++;
-
-        recommendations[recommendationId] = Recommendation({
-            id: recommendationId,
+        string memory _castHash,
+        string memory _country,
+        uint256 _duration
+    ) external onlyManagerContract {
+        recommendations[_id] = Recommendation({
+            id: _id,
             submitterFid: _submitterFid,
             youtubeVideoId: _youtubeVideoId,
             castHash: _castHash,
-            country: user.country,
-            duration: 0, // Will be set by backend after YouTube API call
+            country: _country,
+            duration: _duration,
             submissionTime: block.timestamp,
             scheduledTime: 0,
             state: RecommendationState.SUBMITTED,
@@ -445,58 +416,39 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
             rewardsPaid: 0,
             isActive: true
         });
+    }
 
-        submittedVideoIds[_youtubeVideoId] = true;
-        user.submissionCount++;
-        user.lastSubmissionDay = currentDay;
+    function setVideoSubmissionStatus(string memory _youtubeVideoId, bool _isSubmitted) external onlyManagerContract {
+        submittedVideoIds[_youtubeVideoId] = _isSubmitted;
+    }
 
-        // Reward user for submission
-        _rewardUser(_submitterFid, SUBMISSION_REWARD, "submission");
+    function setRecommendationDuration(uint256 _recommendationId, uint256 _duration) external onlyManagerContract {
+        recommendations[_recommendationId].duration = _duration;
+    }
 
-        emit RecommendationSubmitted(recommendationId, _submitterFid, _youtubeVideoId, _castHash, user.country);
+    function approveRecommendation(uint256 _recommendationId) external onlyManagerContract {
+        _approveRecommendation(_recommendationId);
+    }
+
+    function updateUserSubmissions(uint256 _fid, uint256 _submissionCount, uint256 _lastSubmissionDay)
+        external
+        onlyManagerContract
+    {
+        users[_fid].submissionCount = _submissionCount;
+        users[_fid].lastSubmissionDay = _lastSubmissionDay;
     }
 
     /**
-     * @dev Set video duration with EIP-712 signature verification
-     * @notice Only backend can set duration after YouTube API verification
-     * @param _recommendationId The recommendation ID to set duration for
-     * @param _duration Duration in seconds (1-600)
-     * @param _deadline Signature expiration timestamp
-     * @param _signature EIP-712 signature from backend signer
+     * @dev Internal function to reward users with $HUMANMUSIC tokens
      */
-    function setVideoDuration(
-        uint256 _recommendationId,
-        uint256 _duration,
-        uint256 _deadline,
-        bytes calldata _signature
-    ) external {
-        require(_recommendationId > 0 && _recommendationId < nextRecommendationId, "Invalid recommendation ID");
-        require(_duration > 0 && _duration <= 600, "Duration must be 1-600 seconds");
-        require(block.timestamp <= _deadline, "Signature expired");
-
-        Recommendation storage rec = recommendations[_recommendationId];
-        require(rec.duration == 0, "Duration already set");
-        require(rec.isActive, "Recommendation not active");
-
-        // Verify EIP-712 signature
-        bytes32 structHash =
-            keccak256(abi.encode(DURATION_TYPEHASH, keccak256(bytes(rec.youtubeVideoId)), _duration, _deadline));
-
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
-
-        address signer = digest.recover(_signature);
-        require(signer == backendSigner, "Invalid signature");
-
-        // Set the verified duration
-        rec.duration = _duration;
-
-        emit DurationSet(_recommendationId, rec.youtubeVideoId, _duration);
-
-        // Check if has Upvotes to auto approve
-        if (rec.upvotes >= MIN_UPVOTES_THRESHOLD && rec.upvotes > rec.downvotes) {
-            _approveRecommendation(_recommendationId);
-        }
+    function rewardUser(uint256 _fid, uint256 _amount, string memory _reason) external onlyManagerContract {
+        User storage user = users[_fid];
+        user.tokensEarned += _amount;
+        user.tokenBalance += _amount;
+        emit TokensRewarded(_fid, _amount, _reason);
     }
+
+    // ============ FUNCTIONS ============
 
     /**
      * @dev Vote on a submitted recommendation
