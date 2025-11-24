@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import {Test, console} from "forge-std/Test.sol";
 import {HumanMusicDAO} from "../src/humanmusic.sol";
+import {HumanMusicManager} from "../src/HumanMusicManager.sol";
 import {HumanMusicToken} from "../src/mocks/HumanMusicToken.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
@@ -14,6 +15,7 @@ contract IntegrationTests is Test {
     using ECDSA for bytes32;
 
     HumanMusicDAO public dao;
+    HumanMusicManager public manager;
     HumanMusicToken public token;
 
     // Test addresses
@@ -78,6 +80,12 @@ contract IntegrationTests is Test {
 
         // Deploy DAO as deployer
         dao = new HumanMusicDAO(address(token));
+
+        // Deploy Manager
+        manager = new HumanMusicManager(address(dao));
+
+        // Set manager contract address in DAO
+        dao.setManagerContract(address(manager));
         vm.stopPrank();
 
         // Deposit 100 million tokens (100 * 1e6 * 1e18 = 1e67)
@@ -193,10 +201,10 @@ contract IntegrationTests is Test {
         bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
 
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         vm.prank(user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         vm.prank(user1);
         dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
@@ -273,11 +281,11 @@ contract IntegrationTests is Test {
         bytes memory sig3 = generateRegistrationSignature(voter3Fid, voter3, deadline, deployerPrivateKey());
 
         vm.prank(voter1);
-        dao.registerUser(voter1Fid, "voter1", "US", deadline, sig1);
+        manager.registerUser(voter1Fid, "voter1", "US", deadline, sig1);
         vm.prank(voter2);
-        dao.registerUser(voter2Fid, "voter2", "US", deadline, sig2);
+        manager.registerUser(voter2Fid, "voter2", "US", deadline, sig2);
         vm.prank(voter3);
-        dao.registerUser(voter3Fid, "voter3", "US", deadline, sig3);
+        manager.registerUser(voter3Fid, "voter3", "US", deadline, sig3);
 
         // Check initial state - recommendation should be SUBMITTED
         (
@@ -434,7 +442,7 @@ contract IntegrationTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = generateRegistrationSignature(nonSubmitterFid, nonSubmitter, deadline, deployerPrivateKey());
         vm.prank(nonSubmitter);
-        dao.registerUser(nonSubmitterFid, "nonsubmitter", "US", deadline, sig);
+        manager.registerUser(nonSubmitterFid, "nonsubmitter", "US", deadline, sig);
 
         // Try to call updateSystem
         vm.prank(nonSubmitter);

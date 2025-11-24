@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import {HumanMusicDAO} from "../src/humanmusic.sol";
+import {HumanMusicManager} from "../src/HumanMusicManager.sol";
 import {HumanMusicToken} from "../src/mocks/HumanMusicToken.sol";
 
 /**
@@ -27,5 +28,15 @@ library DeployHelper {
     function deployDAO(address tokenAddress) external returns (address dao) {
         HumanMusicDAO daoContract = new HumanMusicDAO(tokenAddress);
         return address(daoContract);
+    }
+
+    /**
+     * @notice Deploy HumanMusicManager contract
+     * @param daoAddress The address of the HumanMusicDAO contract
+     * @return manager The deployed Manager contract address
+     */
+    function deployManager(address daoAddress) external returns (address manager) {
+        HumanMusicManager managerContract = new HumanMusicManager(daoAddress);
+        return address(managerContract);
     }
 }

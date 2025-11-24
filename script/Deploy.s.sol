@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import {Script, console} from "forge-std/Script.sol";
 import {HumanMusicDAO} from "../src/humanmusic.sol";
+import {HumanMusicManager} from "../src/HumanMusicManager.sol";
 import {HumanMusicToken} from "../src/mocks/HumanMusicToken.sol";
 
 /**
@@ -29,6 +30,7 @@ contract Deploy is Script {
     // Deployment addresses (will be populated after deployment)
     address public tokenAddress;
     address public daoAddress;
+    address public managerAddress;
 
     function run() external {
         uint256 chainId = block.chainid;
@@ -65,15 +67,24 @@ contract Deploy is Script {
         // Deploy HumanMusicDAO
         address dao = deployDAO(token);
 
+        // Deploy HumanMusicManager
+        address manager = deployManager(dao);
+
+        // Set manager contract address in DAO
+        vm.broadcast();
+        HumanMusicDAO(dao).setManagerContract(manager);
+
         // Store addresses
         tokenAddress = token;
         daoAddress = dao;
+        managerAddress = manager;
 
         // Log deployment info
         console.log("==========================================");
         console.log("Deployment Complete!");
         console.log("Token Address:", token);
         console.log("DAO Address:", dao);
+        console.log("Manager Address:", manager);
         console.log("Chain ID:", chainId);
         console.log("==========================================");
 
@@ -105,9 +116,21 @@ contract Deploy is Script {
     }
 
     /**
+     * @notice Deploy HumanMusicManager contract
+     * @param dao The address of the HumanMusicDAO contract
+     */
+    function deployManager(address dao) internal returns (address) {
+        console.log("Deploying HumanMusicManager...");
+        vm.broadcast();
+        HumanMusicManager manager = new HumanMusicManager(dao);
+        console.log("HumanMusicManager deployed at:", address(manager));
+        return address(manager);
+    }
+
+    /**
      * @notice Save deployment information to a JSON file
      */
-    function saveDeploymentInfo(uint256 chainId, address token, address dao) internal {
+    function saveDeploymentInfo(uint256 chainId, address token, address dao, address manager) internal {
         string memory chainName = getChainName(chainId);
         string memory root = vm.projectRoot();
         string memory filename = string.concat(root, "/deployments/", chainName, ".json");
@@ -115,6 +138,7 @@ contract Deploy is Script {
         string memory json = "deployment";
         vm.serializeAddress(json, "tokenAddress", token);
         vm.serializeAddress(json, "daoAddress", dao);
+        vm.serializeAddress(json, "managerAddress", manager);
         vm.serializeUint(json, "chainId", chainId);
         vm.serializeString(json, "chainName", chainName);
         string memory deploymentJson = vm.serializeString(json, "deployedAt", vm.toString(block.timestamp));

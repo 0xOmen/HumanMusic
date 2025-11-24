@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import {Test, console} from "forge-std/Test.sol";
 import {HumanMusicDAO} from "../src/humanmusic.sol";
+import {HumanMusicManager} from "../src/HumanMusicManager.sol";
 import {HumanMusicToken} from "../src/mocks/HumanMusicToken.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
@@ -14,6 +15,7 @@ contract UnitTests is Test {
     using ECDSA for bytes32;
 
     HumanMusicDAO public dao;
+    HumanMusicManager public manager;
     HumanMusicToken public token;
 
     // Test addresses
@@ -76,6 +78,12 @@ contract UnitTests is Test {
 
         // Deploy DAO as deployer
         dao = new HumanMusicDAO(address(token));
+
+        // Deploy Manager
+        manager = new HumanMusicManager(address(dao));
+
+        // Set manager contract address in DAO
+        dao.setManagerContract(address(manager));
         vm.stopPrank();
 
         // Deposit 100 million tokens (100 * 1e6 * 1e18 = 1e67)
@@ -164,7 +172,7 @@ contract UnitTests is Test {
 
         vm.prank(user1);
         vm.expectRevert("Invalid FID");
-        dao.registerUser(0, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(0, USERNAME_1, COUNTRY_1, deadline, signature);
     }
 
     /**
@@ -177,7 +185,7 @@ contract UnitTests is Test {
         vm.prank(user1);
         vm.expectEmit(true, true, true, true);
         emit UserRegistered(FID_1, USERNAME_1, COUNTRY_1, user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Verify user is stored correctly
         (uint256 fid, string memory username, string memory country,,,,,,,) = getUserData(FID_1);
@@ -200,7 +208,7 @@ contract UnitTests is Test {
 
         vm.prank(user1);
         vm.expectRevert("Invalid signature");
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, badSignature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, badSignature);
     }
 
     /**
@@ -211,7 +219,7 @@ contract UnitTests is Test {
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
 
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Get user data
         (
@@ -250,7 +258,7 @@ contract UnitTests is Test {
         assertFalse(dao.userAddressValid(FID_1, user1), "Address should not be valid before registration");
 
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // After registration, address should be valid
         assertTrue(dao.userAddressValid(FID_1, user1), "Address should be valid after registration");
@@ -266,7 +274,7 @@ contract UnitTests is Test {
         vm.prank(user1);
         vm.expectEmit(true, true, true, true);
         emit UserRegistered(FID_1, USERNAME_1, COUNTRY_1, user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
     }
 
     /**
@@ -278,7 +286,7 @@ contract UnitTests is Test {
 
         // Register user first time
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Try to register again
         uint256 newDeadline = block.timestamp + 1 hours;
@@ -286,7 +294,7 @@ contract UnitTests is Test {
 
         vm.prank(user1);
         vm.expectRevert("User already registered");
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, newDeadline, newSignature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, newDeadline, newSignature);
     }
 
     /**
@@ -298,7 +306,7 @@ contract UnitTests is Test {
 
         vm.prank(user1);
         vm.expectRevert("Signature expired");
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
     }
 
     // ============ setBackendSigner TESTS ============
@@ -365,7 +373,7 @@ contract UnitTests is Test {
         vm.prank(user2);
         vm.expectEmit(true, true, true, true);
         emit UserRegistered(FID_2, USERNAME_2, COUNTRY_2, user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature);
 
         // Verify user was registered
         (
@@ -396,7 +404,7 @@ contract UnitTests is Test {
         bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline1, deployerPrivateKey());
 
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline1, signature1);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline1, signature1);
 
         // Change backend signer
         vm.prank(deployer);
@@ -408,7 +416,7 @@ contract UnitTests is Test {
 
         vm.prank(user2);
         vm.expectRevert("Invalid signature");
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline2, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline2, signature2);
     }
 
     // ============ addUserAddress TESTS ============
@@ -421,13 +429,13 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Try to add address from user2 (not registered to FID_1)
         address newAddress = address(0xAAAA);
         vm.prank(user2);
         vm.expectRevert("Sender addr not registered to FID");
-        dao.addUserAddress(FID_1, newAddress);
+        manager.addUserAddress(FID_1, newAddress);
     }
 
     /**
@@ -438,7 +446,7 @@ contract UnitTests is Test {
         address newAddress = address(0xAAAA);
         vm.prank(user1);
         vm.expectRevert("User not registered");
-        dao.addUserAddress(FID_1, newAddress);
+        manager.addUserAddress(FID_1, newAddress);
     }
 
     /**
@@ -449,12 +457,12 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // user1 is already registered to FID_1, try to add it again
         vm.prank(user1);
         vm.expectRevert("Address already registered to FID");
-        dao.addUserAddress(FID_1, user1);
+        manager.addUserAddress(FID_1, user1);
     }
 
     /**
@@ -465,12 +473,12 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Try to add zero address
         vm.prank(user1);
         vm.expectRevert("Invalid address");
-        dao.addUserAddress(FID_1, address(0));
+        manager.addUserAddress(FID_1, address(0));
     }
 
     /**
@@ -481,14 +489,14 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Add new address
         address newAddress = address(0xAAAA);
         assertFalse(dao.userAddressValid(FID_1, newAddress), "Address should not be valid before adding");
 
         vm.prank(user1);
-        dao.addUserAddress(FID_1, newAddress);
+        manager.addUserAddress(FID_1, newAddress);
 
         // Verify address is now valid
         assertTrue(dao.userAddressValid(FID_1, newAddress), "Address should be valid after adding");
@@ -502,14 +510,14 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Add new address
         address newAddress = address(0xAAAA);
         vm.prank(user1);
         vm.expectEmit(true, true, false, false);
         emit UserAddressAdded(FID_1, newAddress);
-        dao.addUserAddress(FID_1, newAddress);
+        manager.addUserAddress(FID_1, newAddress);
     }
 
     // ============ addUserAddressWithSignature TESTS ============
@@ -522,7 +530,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Try to add address with invalid signature (signed by non-owner)
         address newAddress = address(0xAAAA);
@@ -531,7 +539,7 @@ contract UnitTests is Test {
 
         vm.prank(nonOwner);
         vm.expectRevert("Invalid signature");
-        dao.addUserAddressWithSignature(FID_1, newAddress, addDeadline, badSignature);
+        manager.addUserAddressWithSignature(FID_1, newAddress, addDeadline, badSignature);
     }
 
     /**
@@ -545,7 +553,7 @@ contract UnitTests is Test {
 
         vm.prank(nonOwner);
         vm.expectRevert("User not registered");
-        dao.addUserAddressWithSignature(FID_1, newAddress, deadline, signature);
+        manager.addUserAddressWithSignature(FID_1, newAddress, deadline, signature);
     }
 
     /**
@@ -556,7 +564,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Try to add zero address
         uint256 addDeadline = block.timestamp + 1 hours;
@@ -564,7 +572,7 @@ contract UnitTests is Test {
 
         vm.prank(nonOwner);
         vm.expectRevert("Invalid address");
-        dao.addUserAddressWithSignature(FID_1, address(0), addDeadline, addSignature);
+        manager.addUserAddressWithSignature(FID_1, address(0), addDeadline, addSignature);
     }
 
     /**
@@ -575,7 +583,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // user1 is already registered to FID_1, try to add it again
         uint256 addDeadline = block.timestamp + 1 hours;
@@ -583,7 +591,7 @@ contract UnitTests is Test {
 
         vm.prank(nonOwner);
         vm.expectRevert("Address already registered to FID");
-        dao.addUserAddressWithSignature(FID_1, user1, addDeadline, addSignature);
+        manager.addUserAddressWithSignature(FID_1, user1, addDeadline, addSignature);
     }
 
     /**
@@ -594,7 +602,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Create signature with deadline in the future, then warp past it
         address newAddress = address(0xAAAA);
@@ -610,7 +618,7 @@ contract UnitTests is Test {
 
         vm.prank(nonOwner);
         vm.expectRevert("Signature expired");
-        dao.addUserAddressWithSignature(FID_1, newAddress, expiredDeadline, expiredSignature);
+        manager.addUserAddressWithSignature(FID_1, newAddress, expiredDeadline, expiredSignature);
     }
 
     /**
@@ -621,7 +629,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Add new address with valid signature
         address newAddress = address(0xAAAA);
@@ -631,7 +639,7 @@ contract UnitTests is Test {
         bytes memory addSignature = generateRegistrationSignature(FID_1, newAddress, addDeadline, deployerPrivateKey());
 
         vm.prank(nonOwner);
-        dao.addUserAddressWithSignature(FID_1, newAddress, addDeadline, addSignature);
+        manager.addUserAddressWithSignature(FID_1, newAddress, addDeadline, addSignature);
 
         // Verify address is now valid
         assertTrue(dao.userAddressValid(FID_1, newAddress), "Address should be valid after adding");
@@ -645,7 +653,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Add new address with valid signature
         address newAddress = address(0xAAAA);
@@ -655,7 +663,7 @@ contract UnitTests is Test {
         vm.prank(nonOwner);
         vm.expectEmit(true, true, false, false);
         emit UserAddressAdded(FID_1, newAddress);
-        dao.addUserAddressWithSignature(FID_1, newAddress, addDeadline, addSignature);
+        manager.addUserAddressWithSignature(FID_1, newAddress, addDeadline, addSignature);
     }
 
     // ============ submitRecommendation TESTS ============
@@ -678,7 +686,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Try with 10 characters
         vm.prank(user1);
@@ -699,7 +707,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -724,7 +732,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -747,7 +755,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -771,7 +779,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -820,7 +828,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -844,7 +852,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -870,7 +878,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -898,7 +906,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -924,7 +932,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -946,7 +954,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -974,7 +982,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -993,7 +1001,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -1016,7 +1024,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -1039,7 +1047,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -1062,7 +1070,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -1111,7 +1119,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -1135,7 +1143,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -1161,7 +1169,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -1189,7 +1197,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -1215,7 +1223,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // advance by 25 hours
         vm.warp(block.timestamp + 25 hours);
@@ -1237,7 +1245,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         vm.warp(block.timestamp + 25 hours);
         vm.prank(user1);
@@ -1258,9 +1266,9 @@ contract UnitTests is Test {
         bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
         vm.prank(user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         // Try to vote on non-existent recommendation
         vm.prank(user2);
@@ -1277,9 +1285,9 @@ contract UnitTests is Test {
         bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
         vm.prank(user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
@@ -1307,9 +1315,9 @@ contract UnitTests is Test {
         bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
         vm.prank(user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
@@ -1334,7 +1342,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
@@ -1356,9 +1364,9 @@ contract UnitTests is Test {
         bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
         vm.prank(user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
@@ -1385,9 +1393,9 @@ contract UnitTests is Test {
         bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
         vm.prank(user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
@@ -1431,9 +1439,9 @@ contract UnitTests is Test {
         bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
         vm.prank(user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
@@ -1471,9 +1479,9 @@ contract UnitTests is Test {
         bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
         vm.prank(user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         // Submit recommendation
         vm.warp(block.timestamp + 25 hours);
@@ -1498,9 +1506,9 @@ contract UnitTests is Test {
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
         vm.prank(user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         vm.warp(block.timestamp + 25 hours);
         vm.prank(user1);
@@ -1522,9 +1530,9 @@ contract UnitTests is Test {
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
         vm.prank(user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         vm.prank(user1);
         dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
@@ -1612,7 +1620,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         vm.prank(user1);
         dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
@@ -1622,7 +1630,7 @@ contract UnitTests is Test {
         uint256 deadline2 = currentTime + 100 hours; // Large deadline to avoid expiration
         bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline2, deployerPrivateKey());
         vm.prank(user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline2, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline2, signature2);
 
         // Try to reject without being reviewer
         vm.prank(user2);
@@ -1639,10 +1647,10 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature1 = generateRegistrationSignature(FID_1, user1, deadline, deployerPrivateKey());
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature1);
         bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
         vm.prank(user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         vm.prank(user1);
         dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);
@@ -1952,10 +1960,10 @@ contract UnitTests is Test {
         bytes memory signature2 = generateRegistrationSignature(FID_2, user2, deadline, deployerPrivateKey());
 
         vm.prank(user1);
-        dao.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
+        manager.registerUser(FID_1, USERNAME_1, COUNTRY_1, deadline, signature);
 
         vm.prank(user2);
-        dao.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
+        manager.registerUser(FID_2, USERNAME_2, COUNTRY_2, deadline, signature2);
 
         vm.prank(user1);
         dao.submitRecommendation(FID_1, YOUTUBE_VIDEO_ID);

@@ -252,6 +252,9 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     /// @dev Backend signer address that verifies YouTube video durations
     address public backendSigner;
 
+    /// @dev Manager contract address that can interact with the contract
+    address public managerContract;
+
     mapping(uint256 => Recommendation) public recommendations; // Recommendation ID => Recommendation
     mapping(uint256 => User) public users; // FID => User
     mapping(uint256 => Comment) public comments;
@@ -295,8 +298,6 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     event RecommendationTransitioned(uint256 indexed id, RecommendationState newState);
     event VoteCast(uint256 indexed recommendationId, uint256 indexed voterFid, bool isUpvote);
     event CommentAdded(uint256 indexed commentId, uint256 indexed recommendationId, uint256 indexed commenterFid);
-    event UserRegistered(uint256 indexed fid, string username, string country, address indexed registeredAddress);
-    event UserAddressAdded(uint256 indexed fid, address indexed registeredAddress);
     event StreamTransitioned(uint256 indexed fromId, uint256 indexed toId);
     event TokensRewarded(uint256 indexed fid, uint256 amount, string reason);
     event TokensDeposited(uint256 indexed fid, uint256 amount);
@@ -309,6 +310,11 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     event SongsRemovedFromQueue(uint256 indexed songsRemoved);
 
     // ============ MODIFIERS ============
+
+    modifier onlyManagerContract() {
+        require(msg.sender == managerContract, "Only manager contract can call this function");
+        _;
+    }
 
     modifier onlyRegisteredUser(uint256 _fid) {
         require(users[_fid].fid != 0, "User not registered");
@@ -352,36 +358,19 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         );
     }
 
-    // ============ CORE FUNCTIONS ============
+    // ============ SETTERS ============
 
-    /**
-     * @dev Register a new user (called from Farcaster miniapp)
-     * @notice Requires EIP-712 signature from backend signer to prevent FID spoofing
-     * @param _fid The Farcaster FID to register
-     * @param _username The Farcaster username
-     * @param _country The user's country
-     * @param _deadline Signature expiration timestamp
-     * @param _signature EIP-712 signature from backend signer
-     */
-    function registerUser(
+    function setManagerContract(address _managerContract) external onlyOwner {
+        managerContract = _managerContract;
+    }
+
+    function addUser(
         uint256 _fid,
         string memory _username,
         string memory _country,
-        uint256 _deadline,
-        bytes calldata _signature
-    ) external {
-        require(_fid > 0, "Invalid FID");
-        require(users[_fid].fid == 0, "User already registered");
-        require(block.timestamp <= _deadline, "Signature expired");
-
-        // Verify EIP-712 signature
-        bytes32 structHash = keccak256(abi.encode(USER_REGISTRATION_TYPEHASH, _fid, msg.sender, _deadline));
-
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
-
-        address signer = digest.recover(_signature);
-        require(signer == backendSigner, "Invalid signature");
-
+        address _registeredAddress,
+        uint256 _reputationScore
+    ) external onlyManagerContract {
         users[_fid] = User({
             fid: _fid,
             username: _username,
@@ -392,56 +381,15 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
             tokensEarned: 0,
             tokenBalance: 0,
             isReviewer: false,
-            reputationScore: 100 // Starting reputation
+            reputationScore: _reputationScore // Starting reputation
         });
-
-        // Set the initial address as valid
-        userAddressValid[_fid][msg.sender] = true;
-
-        emit UserRegistered(_fid, _username, _country, msg.sender);
     }
 
-    /**
-     * @dev Add a new address to a user's registered addresses
-     * @param _fid The Farcaster FID of the user
-     * @param _newAddress The address to add to the user's addresses
-     */
-    function addUserAddress(uint256 _fid, address _newAddress) external onlyRegisteredUser(_fid) {
-        require(_newAddress != address(0), "Invalid address");
-        require(!userAddressValid[_fid][_newAddress], "Address already registered to FID");
-
-        userAddressValid[_fid][_newAddress] = true;
-        emit UserAddressAdded(_fid, _newAddress);
+    function setUserAddressValid(uint256 _fid, address _registeredAddress, bool _isValid) external onlyManagerContract {
+        userAddressValid[_fid][_registeredAddress] = _isValid;
     }
 
-    /**
-     * @notice Add a new address to a user's FID using an EIP-712 signature from the owner
-     * @notice This is for Clients that have different wallets and addresses for the same FID
-     * @param _fid Farcaster FID of the user
-     * @param _newAddress New address to add to the user's FID
-     * @param _deadline Signature expiration timestamp
-     * @param _signature EIP-712 signature from the owner approving the address addition
-     */
-    function addUserAddressWithSignature(
-        uint256 _fid,
-        address _newAddress,
-        uint256 _deadline,
-        bytes calldata _signature
-    ) external {
-        require(users[_fid].fid != 0, "User not registered");
-        require(_newAddress != address(0), "Invalid address");
-        require(!userAddressValid[_fid][_newAddress], "Address already registered to FID");
-        require(block.timestamp <= _deadline, "Signature expired");
-
-        // Verify EIP-712 signature
-        bytes32 structHash = keccak256(abi.encode(USER_REGISTRATION_TYPEHASH, _fid, _newAddress, _deadline));
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
-        address signer = digest.recover(_signature);
-        require(signer == backendSigner, "Invalid signature");
-
-        userAddressValid[_fid][_newAddress] = true;
-        emit UserAddressAdded(_fid, _newAddress);
-    }
+    // ============ FUNCTIONS ============
 
     /**
      * @dev Submit a new music recommendation (direct via miniapp)
@@ -982,6 +930,34 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     }
 
     // ============ VIEW FUNCTIONS ============
+
+    /**
+     * @dev Get Domain Typehash
+     */
+    function getDomainTypehash() external view returns (bytes32) {
+        return DOMAIN_TYPEHASH;
+    }
+
+    /**
+     * @dev Get Domain Separator
+     */
+    function getDomainSeparator() external view returns (bytes32) {
+        return DOMAIN_SEPARATOR;
+    }
+
+    /**
+     * @dev Get Duration Verification Typehash
+     */
+    function getDurationVerificationTypehash() external view returns (bytes32) {
+        return DURATION_TYPEHASH;
+    }
+
+    /**
+     * @dev Get User Registration Typehash
+     */
+    function getUserRegistrationTypehash() external view returns (bytes32) {
+        return USER_REGISTRATION_TYPEHASH;
+    }
 
     /**
      * @dev Get currently playing recommendation

@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import {Test, console} from "forge-std/Test.sol";
 import {HumanMusicDAO} from "../src/humanmusic.sol";
+import {HumanMusicManager} from "../src/HumanMusicManager.sol";
 import {HumanMusicToken} from "../src/mocks/HumanMusicToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -12,6 +13,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  */
 contract DeploymentTest is Test {
     HumanMusicDAO public dao;
+    HumanMusicManager public manager;
     HumanMusicToken public token;
     address public deployer;
     address public owner;
@@ -32,6 +34,12 @@ contract DeploymentTest is Test {
 
         // Deploy DAO
         dao = new HumanMusicDAO(address(token));
+
+        // Deploy Manager
+        manager = new HumanMusicManager(address(dao));
+
+        // Set manager contract address in DAO
+        dao.setManagerContract(address(manager));
     }
 
     /**
@@ -119,6 +127,10 @@ contract DeploymentTest is Test {
         HumanMusicDAO daoZero = new HumanMusicDAO(address(0));
         assertEq(address(daoZero.humanMusicToken()), address(0), "Token address should be zero");
         assertNotEq(address(daoZero), address(0), "DAO should still be deployed");
+
+        // Deploy manager for the zero token DAO
+        HumanMusicManager managerZero = new HumanMusicManager(address(daoZero));
+        assertEq(address(managerZero.humanMusicDAO()), address(daoZero), "Manager should reference DAO");
     }
 
     /**
@@ -131,9 +143,17 @@ contract DeploymentTest is Test {
         // Deploy DAO with the new token
         HumanMusicDAO newDao = new HumanMusicDAO(address(newToken));
 
+        // Deploy Manager
+        HumanMusicManager newManager = new HumanMusicManager(address(newDao));
+
+        // Set manager contract address in DAO
+        newDao.setManagerContract(address(newManager));
+
         // Verify it was deployed successfully
         assertEq(address(newDao.humanMusicToken()), address(newToken), "DAO should use the new token");
         assertNotEq(address(newDao), address(0), "DAO address should not be zero");
+        assertEq(address(newManager.humanMusicDAO()), address(newDao), "Manager should reference DAO");
+        assertEq(newDao.managerContract(), address(newManager), "DAO should have manager set");
     }
 
     /**
@@ -151,10 +171,20 @@ contract DeploymentTest is Test {
         vm.prank(newDeployer);
         HumanMusicDAO newDao = new HumanMusicDAO(address(newToken));
 
+        // Deploy Manager
+        vm.prank(newDeployer);
+        HumanMusicManager newManager = new HumanMusicManager(address(newDao));
+
+        // Set manager contract address in DAO
+        vm.prank(newDeployer);
+        newDao.setManagerContract(address(newManager));
+
         // Verify owner and backend signer are set to new deployer
         assertEq(newDao.owner(), newDeployer, "Owner should be new deployer");
         assertEq(newDao.backendSigner(), newDeployer, "Backend signer should be new deployer");
         assertEq(address(newDao.humanMusicToken()), address(newToken), "Token should be set correctly");
+        assertEq(address(newManager.humanMusicDAO()), address(newDao), "Manager should reference DAO");
+        assertEq(newDao.managerContract(), address(newManager), "DAO should have manager set");
     }
 
     /**
@@ -173,6 +203,8 @@ contract DeploymentTest is Test {
         // Deploy two DAOs on the same chain
         HumanMusicToken token2 = new HumanMusicToken();
         HumanMusicDAO dao2 = new HumanMusicDAO(address(token2));
+        HumanMusicManager manager2 = new HumanMusicManager(address(dao2));
+        dao2.setManagerContract(address(manager2));
 
         (bytes32 domain1,,, uint256 chainId1, address contract1) = dao.getDomainInfo();
         (bytes32 domain2,,, uint256 chainId2, address contract2) = dao2.getDomainInfo();
@@ -181,5 +213,13 @@ contract DeploymentTest is Test {
         assertNotEq(domain1, domain2, "Domain separators should differ for different contracts");
         assertEq(chainId1, chainId2, "Chain IDs should be the same");
         assertNotEq(contract1, contract2, "Contract addresses should differ");
+    }
+
+    /**
+     * @notice Test that manager contract is set correctly
+     */
+    function test_ManagerContract_IsSetCorrectly() public view {
+        assertEq(dao.managerContract(), address(manager), "Manager contract should be set");
+        assertEq(address(manager.humanMusicDAO()), address(dao), "Manager should reference DAO");
     }
 }
