@@ -348,4 +348,85 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
             HumanMusicDAO(humanMusicDAO).approveRecommendation(_recommendationId);
         }
     }
+
+    /**
+     * @dev Vote on a submitted recommendation
+     */
+    function voteOnRecommendation(uint256 _recommendationId, uint256 _voterFid, bool _isUpvote)
+        external
+        onlyRegisteredUser(_voterFid)
+        validRecommendation(_recommendationId)
+    {
+        (
+            uint256 id,
+            uint256 submitterFid,,,,
+            uint256 duration,
+            uint256 submissionTime,,
+            HumanMusicDAO.RecommendationState state,
+            uint256 upvotes,
+            uint256 downvotes,,
+        ) = HumanMusicDAO(humanMusicDAO).recommendations(_recommendationId);
+        require(state == HumanMusicDAO.RecommendationState.SUBMITTED, "Voting period ended");
+        require(
+            block.timestamp <= submissionTime + HumanMusicDAO(humanMusicDAO).VOTING_PERIOD(), "Voting period expired"
+        );
+        require(!HumanMusicDAO(humanMusicDAO).hasVoted(_voterFid, _recommendationId), "Already voted");
+        require(submitterFid != _voterFid, "Cannot vote on own submission");
+
+        HumanMusicDAO(humanMusicDAO).setHasVoted(_voterFid, _recommendationId, true);
+
+        if (_isUpvote) {
+            upvotes++;
+            HumanMusicDAO(humanMusicDAO).setRecommendationUpvotes(_recommendationId, upvotes);
+            HumanMusicDAO(humanMusicDAO).updateUserTotalUpvotes(submitterFid, 1);
+            HumanMusicDAO(humanMusicDAO).updateUserReputationScore(submitterFid, true, 5);
+
+            // Reward the submitter for receiving an upvote
+            HumanMusicDAO(humanMusicDAO)
+                .rewardUser(submitterFid, HumanMusicDAO(humanMusicDAO).UPVOTE_REWARD(), "upvote_received");
+        } else {
+            downvotes++;
+            HumanMusicDAO(humanMusicDAO).setRecommendationDownvotes(_recommendationId, downvotes);
+            HumanMusicDAO(humanMusicDAO).updateUserReputationScore(submitterFid, false, 2);
+        }
+
+        // Reward the voter for participating
+        HumanMusicDAO(humanMusicDAO).rewardUser(_voterFid, HumanMusicDAO(humanMusicDAO).VOTER_REWARD(), "voting");
+
+        emit VoteCast(_recommendationId, _voterFid, _isUpvote);
+
+        // Auto-approve if threshold met
+        if (upvotes >= HumanMusicDAO(humanMusicDAO).MIN_UPVOTES_THRESHOLD() && upvotes > downvotes && duration > 0) {
+            HumanMusicDAO(humanMusicDAO).approveRecommendation(_recommendationId);
+        }
+    }
+
+    /**
+     * @dev Approve a recommendation for the future queue without requiring vote
+     */
+    function approveRecommendation(uint256 _recommendationId, uint256 _reviewerFid)
+        external
+        onlyReviewer(_reviewerFid)
+        validRecommendation(_recommendationId)
+    {
+        HumanMusicDAO(humanMusicDAO).approveRecommendation(_recommendationId);
+        emit RecommendationApproved(_recommendationId, _reviewerFid);
+    }
+
+    /**
+     * @dev Reject a recommendation
+     */
+    function rejectRecommendation(uint256 _recommendationId, uint256 _reviewerFid)
+        external
+        onlyReviewer(_reviewerFid)
+        validRecommendation(_recommendationId)
+    {
+        (,,string memory youtubeVideoId,,,,,, HumanMusicDAO.RecommendationState state,,,,) = HumanMusicDAO(humanMusicDAO).recommendations(_recommendationId);
+        require(state == HumanMusicDAO.RecommendationState.SUBMITTED, "Already processed");
+
+        HumanMusicDAO(humanMusicDAO).updateRecommendation(_recommendationId, HumanMusicDAO.RecommendationState.SUBMITTED, false);
+        HumanMusicDAO(humanMusicDAO).setVideoSubmissionStatus(youtubeVideoId, false); // Allow resubmission
+
+        emit RecommendationRejected(_recommendationId, _reviewerFid);
+    }
 }

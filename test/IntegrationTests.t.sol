@@ -312,15 +312,15 @@ contract IntegrationTests is Test {
 
         // First upvote
         vm.prank(voter1);
-        dao.voteOnRecommendation(1, voter1Fid, true);
+        manager.voteOnRecommendation(1, voter1Fid, true);
 
         // Second upvote
         vm.prank(voter2);
-        dao.voteOnRecommendation(1, voter2Fid, true);
+        manager.voteOnRecommendation(1, voter2Fid, true);
 
         // Third upvote - this should trigger auto-approval
         vm.prank(voter3);
-        dao.voteOnRecommendation(1, voter3Fid, true);
+        manager.voteOnRecommendation(1, voter3Fid, true);
 
         // Check recommendation state is now APPROVED
         (
@@ -371,7 +371,7 @@ contract IntegrationTests is Test {
 
         // Approve a song
         vm.prank(user2);
-        dao.approveRecommendation(1, FID_2);
+        manager.approveRecommendation(1, FID_2);
 
         // Check initial state
         assertEq(dao.currentlyPlayingId(), 0, "Currently playing ID should be 0 initially");
@@ -432,7 +432,7 @@ contract IntegrationTests is Test {
 
         // Approve and initialize stream
         vm.prank(user2);
-        dao.approveRecommendation(1, FID_2);
+        manager.approveRecommendation(1, FID_2);
         vm.prank(deployer);
         dao.initializeStream();
 
@@ -458,7 +458,7 @@ contract IntegrationTests is Test {
 
         // Approve and initialize stream
         vm.prank(user2);
-        dao.approveRecommendation(1, FID_2);
+        manager.approveRecommendation(1, FID_2);
         vm.prank(deployer);
         dao.initializeStream();
 
@@ -480,7 +480,7 @@ contract IntegrationTests is Test {
 
         // Approve first song and initialize stream
         vm.prank(user2);
-        dao.approveRecommendation(1, FID_2);
+        manager.approveRecommendation(1, FID_2);
         vm.prank(deployer);
         dao.initializeStream();
 
@@ -499,7 +499,7 @@ contract IntegrationTests is Test {
         manager.setVideoDuration(3, 200, durationDeadline, durationSig);
 
         vm.prank(user2);
-        dao.approveRecommendation(3, FID_2);
+        manager.approveRecommendation(3, FID_2);
 
         // Check queue now has 2 songs
         uint256[] memory queueAfter = dao.getSongQueue();
@@ -516,7 +516,7 @@ contract IntegrationTests is Test {
 
         // Approve first song and initialize stream
         vm.prank(user2);
-        dao.approveRecommendation(1, FID_2);
+        manager.approveRecommendation(1, FID_2);
         uint256 initTime = block.timestamp;
         // Submit and approve a second song (need to advance 48 hours for new submission)
         vm.warp(initTime + 48 hours);
@@ -528,7 +528,7 @@ contract IntegrationTests is Test {
         manager.setVideoDuration(3, 200, durationDeadline, durationSig);
 
         vm.prank(user2);
-        dao.approveRecommendation(3, FID_2);
+        manager.approveRecommendation(3, FID_2);
         vm.prank(deployer);
         dao.initializeStream();
 
@@ -570,7 +570,7 @@ contract IntegrationTests is Test {
 
         // Approve first song and initialize stream
         vm.prank(user2);
-        dao.approveRecommendation(1, FID_2);
+        manager.approveRecommendation(1, FID_2);
         vm.prank(deployer);
         dao.initializeStream();
 
@@ -595,9 +595,9 @@ contract IntegrationTests is Test {
         manager.setVideoDuration(4, 150, durationDeadline, durationSig2);
 
         vm.prank(user2);
-        dao.approveRecommendation(3, FID_2);
+        manager.approveRecommendation(3, FID_2);
         vm.prank(user2);
-        dao.approveRecommendation(4, FID_2);
+        manager.approveRecommendation(4, FID_2);
 
         // Advance time from initialization - need to account for the time that passed during submissions
         // Initialize was at some time, then we advanced 48h + 48h = 96 hours for submissions
@@ -622,7 +622,7 @@ contract IntegrationTests is Test {
 
         // Approve first song and initialize stream
         vm.prank(user2);
-        dao.approveRecommendation(1, FID_2);
+        manager.approveRecommendation(1, FID_2);
         vm.prank(deployer);
         dao.initializeStream();
 
@@ -644,7 +644,7 @@ contract IntegrationTests is Test {
 
         // Approve first song and initialize stream
         vm.prank(user2);
-        dao.approveRecommendation(1, FID_2);
+        manager.approveRecommendation(1, FID_2);
 
         // Submit and approve 2 more songs (advance 48 hours between submissions)
         uint256 firstSubmitTime = block.timestamp + 48 hours;
@@ -667,9 +667,9 @@ contract IntegrationTests is Test {
         manager.setVideoDuration(4, 150, durationDeadline, durationSig2);
 
         vm.prank(user2);
-        dao.approveRecommendation(3, FID_2);
+        manager.approveRecommendation(3, FID_2);
         vm.prank(user2);
-        dao.approveRecommendation(4, FID_2);
+        manager.approveRecommendation(4, FID_2);
         vm.prank(deployer);
         dao.initializeStream();
 

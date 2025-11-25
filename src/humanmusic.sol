@@ -426,16 +426,37 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         recommendations[_recommendationId].duration = _duration;
     }
 
-    function approveRecommendation(uint256 _recommendationId) external onlyManagerContract {
-        _approveRecommendation(_recommendationId);
-    }
-
     function updateUserSubmissions(uint256 _fid, uint256 _submissionCount, uint256 _lastSubmissionDay)
         external
         onlyManagerContract
     {
         users[_fid].submissionCount = _submissionCount;
         users[_fid].lastSubmissionDay = _lastSubmissionDay;
+    }
+
+    function setHasVoted(uint256 _fid, uint256 _recommendationId, bool _hasVoted) external onlyManagerContract {
+        hasVoted[_fid][_recommendationId] = _hasVoted;
+    }
+
+    function setRecommendationUpvotes(uint256 _recommendationId, uint256 _upvotes) external onlyManagerContract {
+        recommendations[_recommendationId].upvotes = _upvotes;
+    }
+
+    function setRecommendationDownvotes(uint256 _recommendationId, uint256 _downvotes) external onlyManagerContract {
+        recommendations[_recommendationId].downvotes = _downvotes;
+    }
+
+    function updateUserTotalUpvotes(uint256 _fid, uint256 amount) external onlyManagerContract {
+        users[_fid].totalUpvotes += amount;
+    }
+    
+
+    function updateUserReputationScore(uint256 _fid, bool _isUpvote, uint256 _amount) external onlyManagerContract {
+        if (_isUpvote) {
+            users[_fid].reputationScore += _amount;
+        } else {
+            users[_fid].reputationScore -= _amount;
+        }
     }
 
     /**
@@ -450,60 +471,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
 
     // ============ FUNCTIONS ============
 
-    /**
-     * @dev Vote on a submitted recommendation
-     */
-    function voteOnRecommendation(uint256 _recommendationId, uint256 _voterFid, bool _isUpvote)
-        external
-        onlyRegisteredUser(_voterFid)
-        validRecommendation(_recommendationId)
-    {
-        Recommendation storage rec = recommendations[_recommendationId];
-        require(rec.state == RecommendationState.SUBMITTED, "Voting period ended");
-        require(block.timestamp <= rec.submissionTime + VOTING_PERIOD, "Voting period expired");
-        require(!hasVoted[_voterFid][_recommendationId], "Already voted");
-        require(rec.submitterFid != _voterFid, "Cannot vote on own submission");
-
-        hasVoted[_voterFid][_recommendationId] = true;
-
-        if (_isUpvote) {
-            rec.upvotes++;
-            users[rec.submitterFid].totalUpvotes++;
-            users[rec.submitterFid].reputationScore += 5;
-
-            // Reward the submitter for receiving an upvote
-            _rewardUser(rec.submitterFid, UPVOTE_REWARD, "upvote_received");
-        } else {
-            rec.downvotes++;
-            if (users[rec.submitterFid].reputationScore > 5) {
-                users[rec.submitterFid].reputationScore -= 2;
-            }
-        }
-
-        // Reward the voter for participating
-        _rewardUser(_voterFid, VOTER_REWARD, "voting");
-
-        emit VoteCast(_recommendationId, _voterFid, _isUpvote);
-
-        // Auto-approve if threshold met
-        if (rec.upvotes >= MIN_UPVOTES_THRESHOLD && rec.upvotes > rec.downvotes && rec.duration > 0) {
-            _approveRecommendation(_recommendationId);
-        }
-    }
-
-    /**
-     * @dev Approve a recommendation for the future queue without requiring vote
-     */
-    function approveRecommendation(uint256 _recommendationId, uint256 _reviewerFid)
-        external
-        onlyReviewer(_reviewerFid)
-        validRecommendation(_recommendationId)
-    {
-        _approveRecommendation(_recommendationId);
-        emit RecommendationApproved(_recommendationId, _reviewerFid);
-    }
-
-    function _approveRecommendation(uint256 _recommendationId) internal {
+    function approveRecommendation(uint256 _recommendationId) external onlyManagerContract {
         Recommendation storage rec = recommendations[_recommendationId];
         require(rec.state == RecommendationState.SUBMITTED, "Already processed");
         require(rec.duration > 0, "Duration not set");
@@ -515,21 +483,9 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         emit RecommendationTransitioned(_recommendationId, RecommendationState.APPROVED);
     }
 
-    /**
-     * @dev Reject a recommendation
-     */
-    function rejectRecommendation(uint256 _recommendationId, uint256 _reviewerFid)
-        external
-        onlyReviewer(_reviewerFid)
-        validRecommendation(_recommendationId)
-    {
-        Recommendation storage rec = recommendations[_recommendationId];
-        require(rec.state == RecommendationState.SUBMITTED, "Already processed");
-
-        rec.isActive = false;
-        submittedVideoIds[rec.youtubeVideoId] = false; // Allow resubmission
-
-        emit RecommendationRejected(_recommendationId, _reviewerFid);
+    function updateRecommendation(uint256 _recommendationId, RecommendationState _state, bool _isActive) external onlyManagerContract {
+        recommendations[_recommendationId].state = _state;
+        recommendations[_recommendationId].isActive = _isActive;
     }
 
     /**
@@ -553,7 +509,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         rec.state = RecommendationState.SUBMITTED;
         emit RecommendationUnbanned(_recommendationId);
     }
-
+    
     /**
      * @dev Internal function to reward users with $HUMANMUSIC tokens
      */

@@ -1254,7 +1254,7 @@ contract UnitTests is Test {
         // Try to vote without registering user2
         vm.prank(user2);
         vm.expectRevert("User not registered");
-        dao.voteOnRecommendation(1, FID_2, true);
+        manager.voteOnRecommendation(1, FID_2, true);
     }
 
     /**
@@ -1273,7 +1273,7 @@ contract UnitTests is Test {
         // Try to vote on non-existent recommendation
         vm.prank(user2);
         vm.expectRevert("Invalid recommendation ID");
-        dao.voteOnRecommendation(999, FID_2, true);
+        manager.voteOnRecommendation(999, FID_2, true);
     }
 
     /**
@@ -1303,7 +1303,7 @@ contract UnitTests is Test {
         // Try to vote
         vm.prank(user2);
         vm.expectRevert("Voting period expired");
-        dao.voteOnRecommendation(1, FID_2, true);
+        manager.voteOnRecommendation(1, FID_2, true);
     }
 
     /**
@@ -1326,12 +1326,12 @@ contract UnitTests is Test {
 
         // Vote first time
         vm.prank(user2);
-        dao.voteOnRecommendation(1, FID_2, true);
+        manager.voteOnRecommendation(1, FID_2, true);
 
         // Try to vote again
         vm.prank(user2);
         vm.expectRevert("Already voted");
-        dao.voteOnRecommendation(1, FID_2, true);
+        manager.voteOnRecommendation(1, FID_2, true);
     }
 
     /**
@@ -1352,7 +1352,7 @@ contract UnitTests is Test {
         // Try to vote on own submission
         vm.prank(user1);
         vm.expectRevert("Cannot vote on own submission");
-        dao.voteOnRecommendation(1, FID_1, true);
+        manager.voteOnRecommendation(1, FID_1, true);
     }
 
     /**
@@ -1378,7 +1378,7 @@ contract UnitTests is Test {
 
         // Vote
         vm.prank(user2);
-        dao.voteOnRecommendation(1, FID_2, true);
+        manager.voteOnRecommendation(1, FID_2, true);
 
         // Check hasVoted is now true
         assertTrue(dao.hasVoted(FID_2, 1), "Should have voted");
@@ -1411,7 +1411,7 @@ contract UnitTests is Test {
 
         // Vote up
         vm.prank(user2);
-        dao.voteOnRecommendation(1, FID_2, true);
+        manager.voteOnRecommendation(1, FID_2, true);
 
         // Check upvotes increased
         (,,,,,,,,, upvotes, downvotes,,) = dao.recommendations(1);
@@ -1454,7 +1454,7 @@ contract UnitTests is Test {
 
         // Vote down
         vm.prank(user2);
-        dao.voteOnRecommendation(1, FID_2, false);
+        manager.voteOnRecommendation(1, FID_2, false);
 
         // Check downvotes increased
         (,,,,,,,,, uint256 upvotes, uint256 downvotes,,) = dao.recommendations(1);
@@ -1492,7 +1492,7 @@ contract UnitTests is Test {
         vm.prank(user2);
         vm.expectEmit(true, true, false, false);
         emit VoteCast(1, FID_2, true);
-        dao.voteOnRecommendation(1, FID_2, true);
+        manager.voteOnRecommendation(1, FID_2, true);
     }
 
     // ============ approveRecommendation TESTS ============
@@ -1517,7 +1517,7 @@ contract UnitTests is Test {
         // Try to approve without being reviewer
         vm.prank(user2);
         vm.expectRevert("Not authorized reviewer");
-        dao.approveRecommendation(1, FID_2);
+        manager.approveRecommendation(1, FID_2);
     }
 
     /**
@@ -1583,7 +1583,7 @@ contract UnitTests is Test {
         vm.prank(user2);
         vm.expectEmit(true, false, false, false);
         emit RecommendationApproved(1, FID_2);
-        dao.approveRecommendation(1, FID_2);
+        manager.approveRecommendation(1, FID_2);
 
         // Check state updated
         (
@@ -1635,7 +1635,7 @@ contract UnitTests is Test {
         // Try to reject without being reviewer
         vm.prank(user2);
         vm.expectRevert("Not authorized reviewer");
-        dao.rejectRecommendation(1, FID_2);
+        manager.rejectRecommendation(1, FID_2);
     }
 
     /**
@@ -1695,7 +1695,7 @@ contract UnitTests is Test {
         vm.prank(user2);
         vm.expectEmit(true, true, false, false);
         emit RecommendationRejected(1, FID_2);
-        dao.rejectRecommendation(1, FID_2);
+        manager.rejectRecommendation(1, FID_2);
 
         // Check recommendation is inactive
         (
@@ -1789,7 +1789,7 @@ contract UnitTests is Test {
         vm.prank(deployer);
         dao.grantReviewerRole(FID_2);
         vm.prank(user2);
-        dao.rejectRecommendation(1, FID_2);
+        manager.rejectRecommendation(1, FID_2);
 
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 180, deadline, deployerPrivateKey());
