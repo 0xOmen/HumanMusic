@@ -105,7 +105,7 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
     // ============ MODIFIERS ============
 
     modifier onlyRegisteredUser(uint256 _fid) {
-        (uint256 fid,,,,,,,,,) = HumanMusicDAO(humanMusicDAO).users(_fid);
+        uint256 fid = HumanMusicDAO(humanMusicDAO).getUserFid(_fid);
         require(fid != 0, "User not registered");
         require(HumanMusicDAO(humanMusicDAO).userAddressValid(_fid, msg.sender), "Sender addr not registered to FID");
         _;
@@ -540,5 +540,47 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
 
             emit RecommendationTransitioned(currentlyPlayingId, RecommendationState.PAST);
         }
+    }
+
+    /**
+     * @dev Add a comment to a recommendation
+     */
+    function addComment(uint256 _recommendationId, uint256 _commenterFid, string memory _content)
+        external
+        onlyRegisteredUser(_commenterFid)
+        validRecommendation(_recommendationId)
+    {
+        require(bytes(_content).length > 0, "Comment cannot be empty");
+        require(bytes(_content).length <= 500, "Comment too long");
+
+        uint256 commentId = HumanMusicDAO(humanMusicDAO).nextCommentId();
+        HumanMusicDAO(humanMusicDAO).setNextCommentId(commentId + 1);
+
+        HumanMusicDAO(humanMusicDAO)
+            .setComment(commentId, _recommendationId, _commenterFid, _content, block.timestamp, true);
+
+        HumanMusicDAO(humanMusicDAO).updateUserReputationScore(_commenterFid, true, 1); // Small reputation boost for engagement
+
+        emit CommentAdded(commentId, _recommendationId, _commenterFid);
+    }
+
+    /**
+     * @dev Grant reviewer privileges (requires token holding)
+     */
+    function grantReviewerRole(uint256 _fid) external onlyOwner {
+        require(HumanMusicDAO(humanMusicDAO).getUserFid(_fid) != 0, "User not registered");
+        HumanMusicDAO(humanMusicDAO).updateUserReviewerStatus(_fid, true);
+    }
+
+    /**
+     * @dev Revoke reviewer privileges
+     * @notice subtracts the penalty amount from the user's reputation score
+     * @param _fid The FID of the user to revoke reviewer privileges from
+     * @param penaltyAmount The amount of reputation score to deduct from the user
+     */
+    function revokeReviewerRole(uint256 _fid, uint256 penaltyAmount) external onlyOwner {
+        require(HumanMusicDAO(humanMusicDAO).getUserFid(_fid) != 0, "User not registered");
+        HumanMusicDAO(humanMusicDAO).updateUserReviewerStatus(_fid, false);
+        HumanMusicDAO(humanMusicDAO).updateUserReputationScore(_fid, false, penaltyAmount);
     }
 }

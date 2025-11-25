@@ -462,6 +462,10 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         }
     }
 
+    function updateUserReviewerStatus(uint256 _fid, bool _isReviewer) external onlyManagerContract {
+        users[_fid].isReviewer = _isReviewer;
+    }
+
     /**
      * @dev Internal function to reward users with $HUMANMUSIC tokens
      */
@@ -492,6 +496,27 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         lastUpdateTime = _lastUpdateTime;
     }
 
+    function setNextCommentId(uint256 _nextCommentId) external onlyManagerContract {
+        nextCommentId = _nextCommentId;
+    }
+
+    function setComment(
+        uint256 _commentId,
+        uint256 _recommendationId,
+        uint256 _commenterFid,
+        string memory _content,
+        uint256 _timestamp,
+        bool _isActive
+    ) external onlyManagerContract {
+        comments[_commentId] = Comment({
+            id: _commentId,
+            recommendationId: _recommendationId,
+            commenterFid: _commenterFid,
+            content: _content,
+            timestamp: _timestamp,
+            isActive: _isActive
+        });
+    }
     // ============ FUNCTIONS ============
 
     function approveRecommendation(uint256 _recommendationId) external onlyManagerContract {
@@ -617,51 +642,6 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         }
 
         emit SongsRemovedFromQueue(indicesToRemove.length);
-    }
-
-    /**
-     * @dev Add a comment to a recommendation
-     */
-    function addComment(uint256 _recommendationId, uint256 _commenterFid, string memory _content)
-        external
-        onlyRegisteredUser(_commenterFid)
-        validRecommendation(_recommendationId)
-    {
-        require(bytes(_content).length > 0, "Comment cannot be empty");
-        require(bytes(_content).length <= 500, "Comment too long");
-
-        uint256 commentId = nextCommentId++;
-
-        comments[commentId] = Comment({
-            id: commentId,
-            recommendationId: _recommendationId,
-            commenterFid: _commenterFid,
-            content: _content,
-            timestamp: block.timestamp,
-            isActive: true
-        });
-
-        users[_commenterFid].reputationScore += 1; // Small reputation boost for engagement
-
-        emit CommentAdded(commentId, _recommendationId, _commenterFid);
-    }
-
-    /**
-     * @dev Grant reviewer privileges (requires token holding)
-     */
-    function grantReviewerRole(uint256 _fid) external onlyOwner {
-        require(users[_fid].fid != 0, "User not registered");
-        users[_fid].isReviewer = true;
-    }
-
-    /**
-     * @dev Revoke reviewer privileges
-     * @notice resets the user's Reputation Score to 5
-     */
-    function revokeReviewerRole(uint256 _fid) external onlyOwner {
-        require(users[_fid].fid != 0, "User not registered");
-        users[_fid].isReviewer = false;
-        users[_fid].reputationScore = 5;
     }
 
     /**
@@ -829,6 +809,10 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
      */
     function getDuration(uint256 _id) external view returns (uint256) {
         return recommendations[_id].duration;
+    }
+
+    function getUserFid(uint256 _fid) external view returns (uint256) {
+        return users[_fid].fid;
     }
 
     function getSubmitterFid(uint256 _id) external view returns (uint256) {

@@ -232,7 +232,7 @@ contract IntegrationTests is Test {
         manager.setVideoDuration(2, 180, durationDeadline, durationSig2);
 
         vm.prank(deployer);
-        dao.grantReviewerRole(FID_2);
+        manager.grantReviewerRole(FID_2);
     }
 
     /**

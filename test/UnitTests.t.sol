@@ -1559,7 +1559,7 @@ contract UnitTests is Test {
 
         // Now grant reviewer role
         vm.prank(deployer);
-        dao.grantReviewerRole(FID_2);
+        manager.grantReviewerRole(FID_2);
 
         // Check initial state
         (
@@ -1668,7 +1668,7 @@ contract UnitTests is Test {
         dao.userDepositTokens(FID_2, 1000 * 10 ** 18);
 
         vm.prank(deployer);
-        dao.grantReviewerRole(FID_2);
+        manager.grantReviewerRole(FID_2);
 
         // Check video is submitted
         assertTrue(dao.isVideoSubmitted(YOUTUBE_VIDEO_ID), "Video should be submitted");
@@ -1787,7 +1787,7 @@ contract UnitTests is Test {
 
         // Reject the recommendation to make it inactive
         vm.prank(deployer);
-        dao.grantReviewerRole(FID_2);
+        manager.grantReviewerRole(FID_2);
         vm.prank(user2);
         manager.rejectRecommendation(1, FID_2);
 
