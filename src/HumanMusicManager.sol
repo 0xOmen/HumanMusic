@@ -183,7 +183,7 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
         address signer = digest.recover(_signature);
         require(signer == HumanMusicDAO(humanMusicDAO).getBackendSigner(), "Invalid signature");
 
-        HumanMusicDAO(humanMusicDAO).addUser(_fid, _username, _country, msg.sender, 100);
+        HumanMusicDAO(humanMusicDAO).addUser(_fid, _username, _country, 100);
 
         HumanMusicDAO(humanMusicDAO).setUserAddressValid(_fid, msg.sender, true);
 
@@ -269,7 +269,7 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
         require(bytes(_youtubeVideoId).length == 11, "YouTube video ID must be 11 characters");
         require(!HumanMusicDAO(humanMusicDAO).submittedVideoIds(_youtubeVideoId), "Video already submitted");
 
-        (uint256 fid,, string memory country, uint256 submissionCount,, uint256 lastSubmissionDay,,,,) =
+        (,, string memory country, uint256 submissionCount,, uint256 lastSubmissionDay,,,,) =
             HumanMusicDAO(humanMusicDAO).users(_submitterFid);
         uint256 currentDay = block.timestamp / 1 days;
         require(lastSubmissionDay < currentDay, "Can only submit one video per day");
@@ -311,14 +311,8 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
         require(_duration > minimumDuration && _duration <= maximumDuration, "Duration must be 1-600 seconds");
         require(block.timestamp <= _deadline, "Signature expired");
 
-        (
-            uint256 id,,
-            string memory youtubeVideoId,,,
-            uint256 duration,,,,
-            uint256 upvotes,
-            uint256 downvotes,,
-            bool isActive
-        ) = HumanMusicDAO(humanMusicDAO).recommendations(_recommendationId);
+        (,, string memory youtubeVideoId,,, uint256 duration,,,, uint256 upvotes, uint256 downvotes,, bool isActive) =
+            HumanMusicDAO(humanMusicDAO).recommendations(_recommendationId);
         require(duration == 0, "Duration already set");
         require(isActive, "Recommendation not active");
 
@@ -358,7 +352,7 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
         validRecommendation(_recommendationId)
     {
         (
-            uint256 id,
+            ,
             uint256 submitterFid,,,,
             uint256 duration,
             uint256 submissionTime,,
@@ -421,12 +415,130 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
         onlyReviewer(_reviewerFid)
         validRecommendation(_recommendationId)
     {
-        (,,string memory youtubeVideoId,,,,,, HumanMusicDAO.RecommendationState state,,,,) = HumanMusicDAO(humanMusicDAO).recommendations(_recommendationId);
+        (,, string memory youtubeVideoId,,,,,, HumanMusicDAO.RecommendationState state,,,,) =
+            HumanMusicDAO(humanMusicDAO).recommendations(_recommendationId);
         require(state == HumanMusicDAO.RecommendationState.SUBMITTED, "Already processed");
 
-        HumanMusicDAO(humanMusicDAO).updateRecommendation(_recommendationId, HumanMusicDAO.RecommendationState.SUBMITTED, false);
+        HumanMusicDAO(humanMusicDAO)
+            .updateRecommendation(_recommendationId, HumanMusicDAO.RecommendationState.SUBMITTED, false);
         HumanMusicDAO(humanMusicDAO).setVideoSubmissionStatus(youtubeVideoId, false); // Allow resubmission
 
         emit RecommendationRejected(_recommendationId, _reviewerFid);
+    }
+
+    /**
+     * @dev The eternal thread keeper - anyone who has submitted can call this
+     * @param _callerFid The FID of whoever is calling this function
+     */
+    function updateSystem(uint256 _callerFid) external onlySubmitter(_callerFid) nonReentrant {
+        uint256 currentSongIndex = HumanMusicDAO(humanMusicDAO).currentSongIndex();
+        uint256 currentlyPlayingId = HumanMusicDAO(humanMusicDAO).currentlyPlayingId();
+        uint256 streamStartTime = HumanMusicDAO(humanMusicDAO).streamStartTime();
+        uint256 length = HumanMusicDAO(humanMusicDAO).getSongQueueLength();
+
+        require(currentlyPlayingId != 0, "Stream not initialized");
+
+        uint256 timeElapsed = block.timestamp - streamStartTime;
+        uint256 currentSongDuration = HumanMusicDAO(humanMusicDAO).getDuration(currentlyPlayingId);
+        uint256 songsProcessed = 0;
+        uint256 totalTimeToFill = 0;
+
+        // If current song has finished, move it to past and start processing
+        if (timeElapsed >= currentSongDuration) {
+            _moveCurrentToPast(currentlyPlayingId);
+            totalTimeToFill = timeElapsed - currentSongDuration;
+            songsProcessed++;
+            currentSongIndex++;
+            HumanMusicDAO(humanMusicDAO).setCurrentSongIndex(currentSongIndex);
+        } else {
+            // Current song is still playing, no processing needed
+            return;
+        }
+
+        // Iterate through songQueue from currentSongIndex until time gap is filled
+        while (totalTimeToFill > 0) {
+            // Check if we need to perform Big Bang (reached end of queue)
+            if (currentSongIndex >= length) {
+                _bigBang(currentSongIndex, length);
+                currentSongIndex = 0;
+            }
+
+            // Ensure we have songs to process
+            if (currentSongIndex >= length) {
+                break; // No songs available even after Big Bang
+            }
+
+            uint256 nextSongId = HumanMusicDAO(humanMusicDAO).songQueue(currentSongIndex);
+            currentSongDuration = HumanMusicDAO(humanMusicDAO).getDuration(nextSongId);
+
+            if (totalTimeToFill >= currentSongDuration) {
+                // This song would have finished in the time gap
+                HumanMusicDAO(humanMusicDAO)
+                    .rewardUser(
+                        HumanMusicDAO(humanMusicDAO).getSubmitterFid(nextSongId),
+                        HumanMusicDAO(humanMusicDAO).PLAY_REWARD(),
+                        "song_played"
+                    );
+                HumanMusicDAO(humanMusicDAO)
+                    .increaseRecommendationRewardsPaid(nextSongId, HumanMusicDAO(humanMusicDAO).PLAY_REWARD());
+                totalTimeToFill -= currentSongDuration;
+                songsProcessed++;
+                emit RecommendationTransitioned(nextSongId, RecommendationState.PAST);
+                currentSongIndex++;
+            } else {
+                // This song is currently playing
+                currentlyPlayingId = nextSongId;
+                streamStartTime = block.timestamp - totalTimeToFill;
+                totalTimeToFill = 0;
+                songsProcessed++;
+                emit RecommendationTransitioned(nextSongId, RecommendationState.PRESENT);
+                break;
+            }
+        }
+
+        HumanMusicDAO(humanMusicDAO).setCurrentSongIndex(currentSongIndex);
+        HumanMusicDAO(humanMusicDAO).setLastUpdateTime(block.timestamp);
+        HumanMusicDAO(humanMusicDAO).setStreamStartTime(streamStartTime);
+        HumanMusicDAO(humanMusicDAO).setCurrentlyPlayingId(currentlyPlayingId);
+
+        // Reward the caller for maintaining the eternal stream
+        HumanMusicDAO(humanMusicDAO)
+            .rewardUser(_callerFid, HumanMusicDAO(humanMusicDAO).UPDATE_REWARD(), "system_update");
+
+        emit SystemUpdated(_callerFid, timeElapsed, songsProcessed);
+    }
+
+    /**
+     * @dev Big Bang - reset the queue index to restart the cycle
+     */
+    function _bigBang(uint256 currentSongIndex, uint256 length) internal {
+        require(currentSongIndex >= length, "Can only big bang when queue is exhausted");
+        require(length > 0, "No songs in queue");
+
+        // Reset index to start of queue (states are computed dynamically, no need to update)
+        HumanMusicDAO(humanMusicDAO).setCurrentSongIndex(0);
+        uint256 totalCycleCount = HumanMusicDAO(humanMusicDAO).totalCycleCount() + 1;
+        HumanMusicDAO(humanMusicDAO).setTotalCycleCount(totalCycleCount);
+
+        emit BigBangExecuted(totalCycleCount, length);
+    }
+
+    /**
+     * @dev Internal function to move current song to past
+     */
+    function _moveCurrentToPast(uint256 currentlyPlayingId) internal {
+        if (currentlyPlayingId != 0) {
+            // Reward submitter for their song being played
+            HumanMusicDAO(humanMusicDAO)
+                .rewardUser(
+                    HumanMusicDAO(humanMusicDAO).getSubmitterFid(currentlyPlayingId),
+                    HumanMusicDAO(humanMusicDAO).PLAY_REWARD(),
+                    "song_played"
+                );
+            HumanMusicDAO(humanMusicDAO)
+                .increaseRecommendationRewardsPaid(currentlyPlayingId, HumanMusicDAO(humanMusicDAO).PLAY_REWARD());
+
+            emit RecommendationTransitioned(currentlyPlayingId, RecommendationState.PAST);
+        }
     }
 }

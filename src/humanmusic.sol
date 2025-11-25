@@ -364,13 +364,10 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         managerContract = _managerContract;
     }
 
-    function addUser(
-        uint256 _fid,
-        string memory _username,
-        string memory _country,
-        address _registeredAddress,
-        uint256 _reputationScore
-    ) external onlyManagerContract {
+    function addUser(uint256 _fid, string memory _username, string memory _country, uint256 _reputationScore)
+        external
+        onlyManagerContract
+    {
         users[_fid] = User({
             fid: _fid,
             username: _username,
@@ -446,10 +443,16 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         recommendations[_recommendationId].downvotes = _downvotes;
     }
 
+    function increaseRecommendationRewardsPaid(uint256 _recommendationId, uint256 _rewardsPaid)
+        external
+        onlyManagerContract
+    {
+        recommendations[_recommendationId].rewardsPaid += _rewardsPaid;
+    }
+
     function updateUserTotalUpvotes(uint256 _fid, uint256 amount) external onlyManagerContract {
         users[_fid].totalUpvotes += amount;
     }
-    
 
     function updateUserReputationScore(uint256 _fid, bool _isUpvote, uint256 _amount) external onlyManagerContract {
         if (_isUpvote) {
@@ -469,6 +472,26 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         emit TokensRewarded(_fid, _amount, _reason);
     }
 
+    function setCurrentlyPlayingId(uint256 _currentlyPlayingId) external onlyManagerContract {
+        currentlyPlayingId = _currentlyPlayingId;
+    }
+
+    function setCurrentSongIndex(uint256 _currentSongIndex) external onlyManagerContract {
+        currentSongIndex = _currentSongIndex;
+    }
+
+    function setStreamStartTime(uint256 _streamStartTime) external onlyManagerContract {
+        streamStartTime = _streamStartTime;
+    }
+
+    function setTotalCycleCount(uint256 _totalCycleCount) external onlyManagerContract {
+        totalCycleCount = _totalCycleCount;
+    }
+
+    function setLastUpdateTime(uint256 _lastUpdateTime) external onlyManagerContract {
+        lastUpdateTime = _lastUpdateTime;
+    }
+
     // ============ FUNCTIONS ============
 
     function approveRecommendation(uint256 _recommendationId) external onlyManagerContract {
@@ -483,7 +506,10 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         emit RecommendationTransitioned(_recommendationId, RecommendationState.APPROVED);
     }
 
-    function updateRecommendation(uint256 _recommendationId, RecommendationState _state, bool _isActive) external onlyManagerContract {
+    function updateRecommendation(uint256 _recommendationId, RecommendationState _state, bool _isActive)
+        external
+        onlyManagerContract
+    {
         recommendations[_recommendationId].state = _state;
         recommendations[_recommendationId].isActive = _isActive;
     }
@@ -509,7 +535,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         rec.state = RecommendationState.SUBMITTED;
         emit RecommendationUnbanned(_recommendationId);
     }
-    
+
     /**
      * @dev Internal function to reward users with $HUMANMUSIC tokens
      */
@@ -550,103 +576,6 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
 
         emit StreamInitialized(firstSongId, streamStartTime);
         emit RecommendationTransitioned(firstSongId, getRecommendationState(firstSongId, currentSongIndex));
-    }
-
-    /**
-     * @dev The eternal thread keeper - anyone who has submitted can call this
-     * @param _callerFid The FID of whoever is calling this function
-     */
-    function updateSystem(uint256 _callerFid) external onlySubmitter(_callerFid) nonReentrant {
-        require(currentlyPlayingId != 0, "Stream not initialized");
-
-        uint256 timeElapsed = block.timestamp - streamStartTime;
-        uint256 currentSongDuration = recommendations[currentlyPlayingId].duration;
-        uint256 songsProcessed = 0;
-        uint256 totalTimeToFill = 0;
-
-        // If current song has finished, move it to past and start processing
-        if (timeElapsed >= currentSongDuration) {
-            _moveCurrentToPast();
-            totalTimeToFill = timeElapsed - currentSongDuration;
-            songsProcessed++;
-            currentSongIndex++;
-        } else {
-            // Current song is still playing, no processing needed
-            return;
-        }
-
-        // Iterate through songQueue from currentSongIndex until time gap is filled
-        while (totalTimeToFill > 0) {
-            // Check if we need to perform Big Bang (reached end of queue)
-            if (currentSongIndex >= songQueue.length) {
-                _bigBang();
-            }
-
-            // Ensure we have songs to process
-            if (currentSongIndex >= songQueue.length) {
-                break; // No songs available even after Big Bang
-            }
-
-            uint256 nextSongId = songQueue[currentSongIndex];
-            Recommendation storage nextSong = recommendations[nextSongId];
-
-            if (totalTimeToFill >= nextSong.duration) {
-                // This song would have finished in the time gap
-                _rewardUser(nextSong.submitterFid, PLAY_REWARD, "song_played");
-                nextSong.rewardsPaid += PLAY_REWARD;
-                totalTimeToFill -= nextSong.duration;
-                songsProcessed++;
-                emit RecommendationTransitioned(nextSongId, getRecommendationState(nextSongId, currentSongIndex));
-                currentSongIndex++;
-            } else {
-                // This song is currently playing
-                currentlyPlayingId = nextSongId;
-                streamStartTime = block.timestamp - totalTimeToFill;
-                totalTimeToFill = 0;
-                songsProcessed++;
-                emit RecommendationTransitioned(nextSongId, getRecommendationState(nextSongId, currentSongIndex));
-                break;
-            }
-        }
-
-        lastUpdateTime = block.timestamp;
-
-        // Reward the caller for maintaining the eternal stream
-        _rewardUser(_callerFid, UPDATE_REWARD, "system_update");
-
-        emit SystemUpdated(_callerFid, timeElapsed, songsProcessed);
-    }
-
-    /**
-     * @dev Big Bang - reset the queue index to restart the cycle
-     */
-    function _bigBang() internal {
-        require(currentSongIndex >= songQueue.length, "Can only big bang when queue is exhausted");
-        require(songQueue.length > 0, "No songs in queue");
-
-        // Reset index to start of queue (states are computed dynamically, no need to update)
-        currentSongIndex = 0;
-        totalCycleCount++;
-        uint256 songsMovedCount = songQueue.length;
-
-        emit BigBangExecuted(totalCycleCount, songsMovedCount);
-    }
-
-    /**
-     * @dev Internal function to move current song to past
-     */
-    function _moveCurrentToPast() internal {
-        if (currentlyPlayingId != 0) {
-            Recommendation storage current = recommendations[currentlyPlayingId];
-
-            // Reward submitter for their song being played
-            _rewardUser(current.submitterFid, PLAY_REWARD, "song_played");
-            current.rewardsPaid += PLAY_REWARD;
-
-            emit RecommendationTransitioned(
-                currentlyPlayingId, getRecommendationState(currentlyPlayingId, currentSongIndex)
-            );
-        }
     }
 
     /**
@@ -842,7 +771,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     /**
      * @dev Get Domain Typehash
      */
-    function getDomainTypehash() external view returns (bytes32) {
+    function getDomainTypehash() external pure returns (bytes32) {
         return DOMAIN_TYPEHASH;
     }
 
@@ -856,14 +785,14 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     /**
      * @dev Get Duration Verification Typehash
      */
-    function getDurationVerificationTypehash() external view returns (bytes32) {
+    function getDurationVerificationTypehash() external pure returns (bytes32) {
         return DURATION_TYPEHASH;
     }
 
     /**
      * @dev Get User Registration Typehash
      */
-    function getUserRegistrationTypehash() external view returns (bytes32) {
+    function getUserRegistrationTypehash() external pure returns (bytes32) {
         return USER_REGISTRATION_TYPEHASH;
     }
 
@@ -882,11 +811,28 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         return songQueue;
     }
 
+    function getSongQueueLength() external view returns (uint256) {
+        return songQueue.length;
+    }
+
     /**
      * @dev Get the current song index
      */
     function getCurrentSongIndex() external view returns (uint256) {
         return currentSongIndex;
+    }
+
+    /**
+     * @dev Get the duration of a recommendation
+     * @param _id The recommendation ID
+     * @return The duration in seconds
+     */
+    function getDuration(uint256 _id) external view returns (uint256) {
+        return recommendations[_id].duration;
+    }
+
+    function getSubmitterFid(uint256 _id) external view returns (uint256) {
+        return recommendations[_id].submitterFid;
     }
 
     /**

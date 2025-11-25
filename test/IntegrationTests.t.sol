@@ -421,7 +421,7 @@ contract IntegrationTests is Test {
         // Don't initialize stream
         vm.prank(user1);
         vm.expectRevert("Stream not initialized");
-        dao.updateSystem(FID_1);
+        manager.updateSystem(FID_1);
     }
 
     /**
@@ -447,7 +447,7 @@ contract IntegrationTests is Test {
         // Try to call updateSystem
         vm.prank(nonSubmitter);
         vm.expectRevert("Must have submitted at least one video");
-        dao.updateSystem(nonSubmitterFid);
+        manager.updateSystem(nonSubmitterFid);
     }
 
     /**
@@ -465,7 +465,7 @@ contract IntegrationTests is Test {
         // Try to update immediately - song should still be playing (duration is 180 seconds)
         uint256 lastUpdateTimeBefore = dao.lastUpdateTime();
         vm.prank(user1);
-        dao.updateSystem(FID_1);
+        manager.updateSystem(FID_1);
 
         // lastUpdateTime should not change (function returned early)
         assertEq(dao.lastUpdateTime(), lastUpdateTimeBefore, "Last update time should not change if song still playing");
@@ -546,7 +546,7 @@ contract IntegrationTests is Test {
         (,,,,,,, uint256 callerBalanceBefore,,) = getUserData(FID_1);
 
         vm.prank(user1);
-        dao.updateSystem(FID_1);
+        manager.updateSystem(FID_1);
 
         assertGt(dao.currentlyPlayingId(), 0, "Currently playing ID should be set after update");
 
@@ -607,7 +607,7 @@ contract IntegrationTests is Test {
 
         // Update system
         vm.prank(user1);
-        dao.updateSystem(FID_1);
+        manager.updateSystem(FID_1);
 
         // After processing, verify that songs were processed
         // Due to the large time gap from submissions, many songs may have been processed
@@ -633,7 +633,7 @@ contract IntegrationTests is Test {
         vm.prank(user1);
         vm.expectEmit(true, false, false, false);
         emit SystemUpdated(FID_1, 181, 1); // 1 song processed (only current song finished, no next song)
-        dao.updateSystem(FID_1);
+        manager.updateSystem(FID_1);
     }
 
     /**
@@ -683,7 +683,7 @@ contract IntegrationTests is Test {
 
         // Update system
         vm.prank(user1);
-        dao.updateSystem(FID_1);
+        manager.updateSystem(FID_1);
 
         // Verify current settings equal what was retruned by getSystemHealth
         assertEq(
