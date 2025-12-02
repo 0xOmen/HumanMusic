@@ -85,22 +85,14 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
 
     event RecommendationApproved(uint256 indexed id, uint256 approvedBy);
     event RecommendationRejected(uint256 indexed id, uint256 rejectedBy);
-    event RecommendationBanned(uint256 indexed id);
-    event RecommendationUnbanned(uint256 indexed id);
     event RecommendationTransitioned(uint256 indexed id, RecommendationState newState);
     event VoteCast(uint256 indexed recommendationId, uint256 indexed voterFid, bool isUpvote);
     event CommentAdded(uint256 indexed commentId, uint256 indexed recommendationId, uint256 indexed commenterFid);
     event UserRegistered(uint256 indexed fid, string username, string country, address indexed registeredAddress);
     event UserAddressAdded(uint256 indexed fid, address indexed registeredAddress);
-    event StreamTransitioned(uint256 indexed fromId, uint256 indexed toId);
-    event TokensRewarded(uint256 indexed fid, uint256 amount, string reason);
-    event TokensDeposited(uint256 indexed fid, uint256 amount);
-    event TokensWithdrawn(uint256 indexed fid, uint256 amount);
     event SystemUpdated(uint256 indexed callerFid, uint256 timeGapFilled, uint256 songsProcessed);
     event BigBangExecuted(uint256 cycleCount, uint256 songsMovedToFuture);
     event DurationSet(uint256 indexed recommendationId, string youtubeVideoId, uint256 duration);
-    event BackendSignerUpdated(address indexed oldSigner, address indexed newSigner);
-    event SongsRemovedFromQueue(uint256 indexed songsRemoved);
 
     // ============ MODIFIERS ============
 

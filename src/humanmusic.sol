@@ -291,46 +291,26 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         uint256 indexed id, uint256 indexed submitterFid, string youtubeVideoId, string castHash, string country
     );
 
-    event RecommendationApproved(uint256 indexed id, uint256 approvedBy);
-    event RecommendationRejected(uint256 indexed id, uint256 rejectedBy);
     event RecommendationBanned(uint256 indexed id);
     event RecommendationUnbanned(uint256 indexed id);
     event RecommendationTransitioned(uint256 indexed id, RecommendationState newState);
-    event VoteCast(uint256 indexed recommendationId, uint256 indexed voterFid, bool isUpvote);
-    event CommentAdded(uint256 indexed commentId, uint256 indexed recommendationId, uint256 indexed commenterFid);
-    event StreamTransitioned(uint256 indexed fromId, uint256 indexed toId);
     event TokensRewarded(uint256 indexed fid, uint256 amount, string reason);
     event TokensDeposited(uint256 indexed fid, uint256 amount);
     event TokensWithdrawn(uint256 indexed fid, uint256 amount);
-    event SystemUpdated(uint256 indexed callerFid, uint256 timeGapFilled, uint256 songsProcessed);
-    event BigBangExecuted(uint256 cycleCount, uint256 songsMovedToFuture);
     event StreamInitialized(uint256 indexed firstSongId, uint256 startTime);
-    event DurationSet(uint256 indexed recommendationId, string youtubeVideoId, uint256 duration);
     event BackendSignerUpdated(address indexed oldSigner, address indexed newSigner);
     event SongsRemovedFromQueue(uint256 indexed songsRemoved);
+    event ManagerContractUpdated(address indexed oldManagerContract, address indexed newManagerContract);
 
     // ============ MODIFIERS ============
 
     modifier onlyManagerContract() {
-        require(msg.sender == managerContract, "Only manager contract can call this function");
+        _onlyManagerContract();
         _;
     }
 
     modifier onlyRegisteredUser(uint256 _fid) {
         require(users[_fid].fid != 0, "User not registered");
-        require(userAddressValid[_fid][msg.sender], "Sender addr not registered to FID");
-        _;
-    }
-
-    modifier onlyReviewer(uint256 _fid) {
-        require(users[_fid].isReviewer, "Not authorized reviewer");
-        require(userAddressValid[_fid][msg.sender], "Sender addr not registered to FID");
-        require(users[_fid].tokenBalance >= REVIEWER_TOKEN_REQUIREMENT, "Insufficient tokens");
-        _;
-    }
-
-    modifier onlySubmitter(uint256 _fid) {
-        require(users[_fid].submissionCount > 0, "Must have submitted at least one video");
         require(userAddressValid[_fid][msg.sender], "Sender addr not registered to FID");
         _;
     }
@@ -358,9 +338,14 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         );
     }
 
+    function _onlyManagerContract() internal view {
+        require(msg.sender == managerContract, "Only manager contract can call this function");
+    }
+
     // ============ SETTERS ============
 
     function setManagerContract(address _managerContract) external onlyOwner {
+        emit ManagerContractUpdated(managerContract, _managerContract);
         managerContract = _managerContract;
     }
 
@@ -470,9 +455,8 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
      * @dev Internal function to reward users with $HUMANMUSIC tokens
      */
     function rewardUser(uint256 _fid, uint256 _amount, string memory _reason) external onlyManagerContract {
-        User storage user = users[_fid];
-        user.tokensEarned += _amount;
-        user.tokenBalance += _amount;
+        users[_fid].tokensEarned += _amount;
+        users[_fid].tokenBalance += _amount;
         emit TokensRewarded(_fid, _amount, _reason);
     }
 
@@ -544,9 +528,8 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
      * @param _recommendationId The recommendation ID to ban
      */
     function banRecommendation(uint256 _recommendationId) external onlyOwner validRecommendation(_recommendationId) {
-        Recommendation storage rec = recommendations[_recommendationId];
-        require(rec.state == RecommendationState.SUBMITTED, "Already processed");
-        rec.state = RecommendationState.BANNED;
+        require(recommendations[_recommendationId].state == RecommendationState.SUBMITTED, "Already processed");
+        recommendations[_recommendationId].state = RecommendationState.BANNED;
         emit RecommendationBanned(_recommendationId);
     }
 
@@ -555,9 +538,8 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
      * @param _recommendationId The recommendation ID to unban
      */
     function unbanRecommendation(uint256 _recommendationId) external onlyOwner validRecommendation(_recommendationId) {
-        Recommendation storage rec = recommendations[_recommendationId];
-        require(rec.state == RecommendationState.BANNED, "Not banned");
-        rec.state = RecommendationState.SUBMITTED;
+        require(recommendations[_recommendationId].state == RecommendationState.BANNED, "Not banned");
+        recommendations[_recommendationId].state = RecommendationState.SUBMITTED;
         emit RecommendationUnbanned(_recommendationId);
     }
 
@@ -565,9 +547,8 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
      * @dev Internal function to reward users with $HUMANMUSIC tokens
      */
     function _rewardUser(uint256 _fid, uint256 _amount, string memory _reason) internal {
-        User storage user = users[_fid];
-        user.tokensEarned += _amount;
-        user.tokenBalance += _amount;
+        users[_fid].tokensEarned += _amount;
+        users[_fid].tokenBalance += _amount;
         emit TokensRewarded(_fid, _amount, _reason);
     }
 
@@ -575,8 +556,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
      * @dev External function so user can deposit $HUMANMUSIC tokens for rolls
      */
     function userDepositTokens(uint256 _fid, uint256 _amount) external nonReentrant {
-        User storage user = users[_fid];
-        user.tokenBalance += _amount;
+        users[_fid].tokenBalance += _amount;
         emit TokensDeposited(_fid, _amount);
         require(humanMusicToken.transferFrom(msg.sender, address(this), _amount), "Token transfer failed");
     }
@@ -593,8 +573,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         uint256 firstSongId = songQueue[0];
 
         // Set as currently playing
-        Recommendation storage firstSong = recommendations[firstSongId];
-        require(firstSong.duration > 0, "First song must have duration set");
+        require(recommendations[firstSongId].duration > 0, "First song must have duration set");
         currentlyPlayingId = firstSongId;
         streamStartTime = block.timestamp;
         lastUpdateTime = block.timestamp;
@@ -658,11 +637,10 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
      * @dev Withdraw $HUMANMUSIC tokens
      */
     function withdrawTokens(uint256 _fid, uint256 _amount) external onlyRegisteredUser(_fid) nonReentrant {
-        User storage user = users[_fid];
-        require(user.tokenBalance >= _amount, "Insufficient balance");
+        require(users[_fid].tokenBalance >= _amount, "Insufficient balance");
         require(_amount > 0, "Amount must be positive");
 
-        user.tokenBalance -= _amount;
+        users[_fid].tokenBalance -= _amount;
         require(humanMusicToken.transfer(msg.sender, _amount), "Token transfer failed");
 
         emit TokensWithdrawn(_fid, _amount);
