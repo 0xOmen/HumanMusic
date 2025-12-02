@@ -93,7 +93,9 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
     event SystemUpdated(uint256 indexed callerFid, uint256 timeGapFilled, uint256 songsProcessed);
     event BigBangExecuted(uint256 cycleCount, uint256 songsMovedToFuture);
     event DurationSet(uint256 indexed recommendationId, string youtubeVideoId, uint256 duration);
-
+    event EmergencySet(
+        uint256 currentSongIndex, uint256 currentlyPlayingId, uint256 streamStartTime, uint256 totalCycleCount
+    );
     // ============ MODIFIERS ============
 
     modifier onlyRegisteredUser(uint256 _fid) {
@@ -236,6 +238,55 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
         onlyRegisteredUser(_submitterFid)
     {
         _submitRecommendationInternal(_submitterFid, _youtubeVideoId, "");
+    }
+
+    /**
+     * @dev Submit a recommendation with duration in a single transaction
+     * @notice Combines submitRecommendation and setVideoDuration for convenience
+     * @notice Requires EIP-712 signature from backend signer for duration verification
+     * @param _submitterFid The Farcaster FID of the submitter
+     * @param _youtubeVideoId The YouTube video ID (11 characters)
+     * @param _duration Duration in seconds (must be within minimumDuration and maximumDuration)
+     * @param _deadline Signature expiration timestamp
+     * @param _signature EIP-712 signature from backend signer for duration verification
+     */
+    function submitRecommendationWithDuration(
+        uint256 _submitterFid,
+        string memory _youtubeVideoId,
+        uint256 _duration,
+        uint256 _deadline,
+        bytes calldata _signature
+    ) external onlyRegisteredUser(_submitterFid) nonReentrant {
+        // Submit the recommendation first
+        _submitRecommendationInternal(_submitterFid, _youtubeVideoId, "");
+
+        // Get the recommendation ID that was just created
+        uint256 recommendationId = HumanMusicDAO(humanMusicDAO).nextRecommendationId() - 1;
+
+        // Validate duration
+        require(_duration > minimumDuration && _duration <= maximumDuration, "Duration must be within valid range");
+        require(block.timestamp <= _deadline, "Signature expired");
+
+        // Verify EIP-712 signature for duration
+        bytes32 structHash = keccak256(
+            abi.encode(
+                HumanMusicDAO(humanMusicDAO).getDurationVerificationTypehash(),
+                keccak256(bytes(_youtubeVideoId)),
+                _duration,
+                _deadline
+            )
+        );
+
+        bytes32 digest =
+            keccak256(abi.encodePacked("\x19\x01", HumanMusicDAO(humanMusicDAO).getDomainSeparator(), structHash));
+
+        address signer = digest.recover(_signature);
+        require(signer == HumanMusicDAO(humanMusicDAO).getBackendSigner(), "Invalid signature");
+
+        // Set the verified duration
+        HumanMusicDAO(humanMusicDAO).setRecommendationDuration(recommendationId, _duration);
+
+        emit DurationSet(recommendationId, _youtubeVideoId, _duration);
     }
 
     /**
@@ -441,7 +492,6 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
             totalTimeToFill = timeElapsed - currentSongDuration;
             songsProcessed++;
             currentSongIndex++;
-            HumanMusicDAO(humanMusicDAO).setCurrentSongIndex(currentSongIndex);
         } else {
             // Current song is still playing, no processing needed
             return;
@@ -532,6 +582,22 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
 
             emit RecommendationTransitioned(currentlyPlayingId, RecommendationState.PAST);
         }
+    }
+
+    function emergencySet(
+        uint256 currentSongIndex,
+        uint256 currentlyPlayingId,
+        uint256 streamStartTime,
+        uint256 totalCycleCount
+    ) external onlyOwner {
+        require(currentSongIndex < HumanMusicDAO(humanMusicDAO).getSongQueueLength(), "Invalid current song index");
+
+        HumanMusicDAO(humanMusicDAO).setCurrentSongIndex(currentSongIndex);
+        HumanMusicDAO(humanMusicDAO).setCurrentlyPlayingId(currentlyPlayingId);
+        HumanMusicDAO(humanMusicDAO).setStreamStartTime(streamStartTime);
+        HumanMusicDAO(humanMusicDAO).setLastUpdateTime(block.timestamp);
+        HumanMusicDAO(humanMusicDAO).setTotalCycleCount(totalCycleCount);
+        emit EmergencySet(currentSongIndex, currentlyPlayingId, streamStartTime, totalCycleCount);
     }
 
     /**
