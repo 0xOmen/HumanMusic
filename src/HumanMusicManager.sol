@@ -76,6 +76,9 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
         bool isActive;
     }
 
+    /// @dev EIP-712 domain separator, computed at deployment
+    bytes32 private immutable DOMAIN_SEPARATOR;
+
     uint256 public minimumDuration;
     uint256 public maximumDuration;
 
@@ -133,6 +136,7 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
         minimumDuration = _minimumDuration;
         maximumDuration = _maximumDuration;
         humanMusicDAO = HumanMusicDAO(_humanMusicDAO);
+        DOMAIN_SEPARATOR = HumanMusicDAO(humanMusicDAO).getDomainSeparator();
     }
 
     function setMinimumDuration(uint256 _minimumDuration) external onlyOwner {
@@ -162,7 +166,7 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
         bytes calldata _signature
     ) external {
         require(_fid > 0, "Invalid FID");
-        (uint256 fid,,,,,,,,,) = HumanMusicDAO(humanMusicDAO).users(_fid);
+        uint256 fid = HumanMusicDAO(humanMusicDAO).getUserFid(_fid);
         require(fid == 0, "User already registered");
         require(block.timestamp <= _deadline, "Signature expired");
 
@@ -171,8 +175,7 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
             abi.encode(HumanMusicDAO(humanMusicDAO).getUserRegistrationTypehash(), _fid, msg.sender, _deadline)
         );
 
-        bytes32 digest =
-            keccak256(abi.encodePacked("\x19\x01", HumanMusicDAO(humanMusicDAO).getDomainSeparator(), structHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
 
         address signer = digest.recover(_signature);
         require(signer == HumanMusicDAO(humanMusicDAO).getBackendSigner(), "Invalid signature");
@@ -211,7 +214,7 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
         uint256 _deadline,
         bytes calldata _signature
     ) external {
-        (uint256 fid,,,,,,,,,) = HumanMusicDAO(humanMusicDAO).users(_fid);
+        uint256 fid = HumanMusicDAO(humanMusicDAO).getUserFid(_fid);
         require(fid != 0, "User not registered");
         require(_newAddress != address(0), "Invalid address");
         require(!HumanMusicDAO(humanMusicDAO).userAddressValid(_fid, _newAddress), "Address already registered to FID");
@@ -221,8 +224,7 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
         bytes32 structHash = keccak256(
             abi.encode(HumanMusicDAO(humanMusicDAO).getUserRegistrationTypehash(), _fid, _newAddress, _deadline)
         );
-        bytes32 digest =
-            keccak256(abi.encodePacked("\x19\x01", HumanMusicDAO(humanMusicDAO).getDomainSeparator(), structHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
         address signer = digest.recover(_signature);
         require(signer == HumanMusicDAO(humanMusicDAO).getBackendSigner(), "Invalid signature");
 
@@ -277,8 +279,7 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
             )
         );
 
-        bytes32 digest =
-            keccak256(abi.encodePacked("\x19\x01", HumanMusicDAO(humanMusicDAO).getDomainSeparator(), structHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
 
         address signer = digest.recover(_signature);
         require(signer == HumanMusicDAO(humanMusicDAO).getBackendSigner(), "Invalid signature");
@@ -296,7 +297,7 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
         external
     {
         require(msg.sender == HumanMusicDAO(humanMusicDAO).getBackendSigner(), "Only backend can submit from cast");
-        (uint256 fid,,,,,,,,,) = HumanMusicDAO(humanMusicDAO).users(_submitterFid);
+        uint256 fid = HumanMusicDAO(humanMusicDAO).getUserFid(_submitterFid);
         require(fid != 0, "User not registered");
         _submitRecommendationInternal(_submitterFid, _youtubeVideoId, _castHash);
     }
@@ -351,7 +352,7 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
             _recommendationId > 0 && _recommendationId < HumanMusicDAO(humanMusicDAO).nextRecommendationId(),
             "Invalid recommendation ID"
         );
-        require(_duration > minimumDuration && _duration <= maximumDuration, "Duration must be 1-600 seconds");
+        require(_duration > minimumDuration && _duration <= maximumDuration, "Duration must be within valid range");
         require(block.timestamp <= _deadline, "Signature expired");
 
         (,, string memory youtubeVideoId,,, uint256 duration,,,, uint256 upvotes, uint256 downvotes,, bool isActive) =
@@ -369,8 +370,7 @@ contract HumanMusicManager is Ownable, ReentrancyGuard {
             )
         );
 
-        bytes32 digest =
-            keccak256(abi.encodePacked("\x19\x01", HumanMusicDAO(humanMusicDAO).getDomainSeparator(), structHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
 
         address signer = digest.recover(_signature);
         require(signer == HumanMusicDAO(humanMusicDAO).getBackendSigner(), "Invalid signature");
