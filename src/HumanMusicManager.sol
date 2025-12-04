@@ -20,6 +20,16 @@ import {HumanMusicDAO} from "./humanmusic.sol";
  *                                  HUMAN MUSIC MANAGER
  * ============================================================================
  *
+ * This contract is used to manage the HumanMusicDAO contract and provide a way to interact with it.
+ * It allows for the humanmusic.sol contract to have adjustable logic by changing the manager contract.
+ * The manager contract is responsible for the following:
+ * - Registering users
+ * - Adding user addresses
+ * - Submitting recommendations
+ * - Voting on recommendations
+ * - Commenting on recommendations
+ * - Banning recommendations
+ * - Unbanning recommendations
  */
 
 // ============ EVENTS ============
