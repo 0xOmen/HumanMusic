@@ -1743,7 +1743,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 0, deadline, deployerPrivateKey());
 
-        vm.expectRevert("Duration must be 1-600 seconds");
+        vm.expectRevert("Duration must be within valid range");
         manager.setVideoDuration(1, 0, deadline, signature);
     }
 
@@ -1756,7 +1756,7 @@ contract UnitTests is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = generateDurationSignature(YOUTUBE_VIDEO_ID, 601, deadline, deployerPrivateKey());
 
-        vm.expectRevert("Duration must be 1-600 seconds");
+        vm.expectRevert("Duration must be within valid range");
         manager.setVideoDuration(1, 601, deadline, signature);
     }
 

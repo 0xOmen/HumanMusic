@@ -1070,10 +1070,20 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         return (timeGapToFill, songsToProcess, bigBangsNeeded, newCurrentSongId);
     }
 
+    /**
+     * @dev Get system health - returns critical information for updating the system
+     */
     function getSystemHealth()
         public
         view
-        returns (uint256 timeGapToFill, uint256 songsProcessed, uint256 bigBangsNeeded, uint256 newCurrentSongId)
+        returns (
+            uint256 timeGapToFill,
+            uint256 songsProcessed,
+            uint256 bigBangsNeeded,
+            uint256 newCurrentSongId,
+            uint256 _currentSongIndex,
+            uint256 _totalCycleCount
+        )
     {
         uint256 timeElapsed = block.timestamp - streamStartTime;
         uint256 currentSongDuration = recommendations[currentlyPlayingId].duration;
@@ -1081,7 +1091,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
         songsProcessed = 0;
         bigBangsNeeded = 0;
         uint256 totalTimeToFill = 0;
-        uint256 _currentSongIndex = currentSongIndex;
+        _currentSongIndex = currentSongIndex;
 
         // If current song has finished, move it to past and start processing
         if (timeElapsed >= currentSongDuration) {
@@ -1090,7 +1100,14 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
             _currentSongIndex++;
         } else {
             // Current song is still playing, no processing needed
-            return (0, songsProcessed, bigBangsNeeded, currentlyPlayingId);
+            return (
+                0,
+                songsProcessed,
+                bigBangsNeeded,
+                currentlyPlayingId,
+                _currentSongIndex,
+                totalCycleCount + bigBangsNeeded
+            );
         }
 
         // Iterate through songQueue from currentSongIndex until time gap is filled
@@ -1122,6 +1139,13 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
                 break;
             }
         }
-        return (timeElapsed, songsProcessed, bigBangsNeeded, newCurrentSongId);
+        return (
+            timeElapsed,
+            songsProcessed,
+            bigBangsNeeded,
+            newCurrentSongId,
+            _currentSongIndex,
+            totalCycleCount + bigBangsNeeded
+        );
     }
 }

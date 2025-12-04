@@ -637,9 +637,9 @@ contract IntegrationTests is Test {
     }
 
     /**
-     * @notice Test that updateSystem processes multiple songs in sequence
+     * @notice Test that getSystemHealth returns the same values that updateSystem will set
      */
-    function test_getSystemHealth_ProcessesMultipleSongs() public {
+    function test_getSystemHealth_ReturnsCorrectValuesBeforeUpdateSystem() public {
         setupUsersWithRecommendationAndReviewerTokens();
 
         // Approve first song and initialize stream
@@ -673,21 +673,148 @@ contract IntegrationTests is Test {
         vm.prank(deployer);
         dao.initializeStream();
 
-        // Advance time from initialization
+        // Store initial state
+        uint256 initialCurrentSongIndex = dao.getCurrentSongIndex();
+        uint256 initialCurrentlyPlayingId = dao.currentlyPlayingId();
+        uint256 initialTotalCycleCount = dao.totalCycleCount();
+
+        // Advance time from initialization (1205 seconds = 180 + 100 + 150 + 775 remaining)
         vm.warp(block.timestamp + 1205 seconds);
 
-        // Get system health
-        (uint256 timeGapToFill, uint256 songsToProcess, uint256 bigBangsNeeded, uint256 newCurrentSongId) =
-            dao.getSystemHealth();
-        assertEq(timeGapToFill, 1205 seconds, "Time gap to fill should be 1205 seconds");
+        // Get system health before updateSystem
+        (
+            uint256 timeElapsed,
+            uint256 songsProcessed,
+            uint256 bigBangsNeeded,
+            uint256 newCurrentSongId,
+            uint256 newCurrentSongIndex,
+            uint256 newTotalCycleCount
+        ) = dao.getSystemHealth();
 
         // Update system
         vm.prank(user1);
         manager.updateSystem(FID_1);
 
-        // Verify current settings equal what was retruned by getSystemHealth
+        // Verify all state variables match what getSystemHealth predicted
         assertEq(
-            dao.currentlyPlayingId(), newCurrentSongId, "Currently playing ID should be set to new current song ID"
+            dao.currentlyPlayingId(), newCurrentSongId, "Currently playing ID should match getSystemHealth prediction"
+        );
+        assertEq(
+            dao.getCurrentSongIndex(), newCurrentSongIndex, "Current song index should match getSystemHealth prediction"
+        );
+        assertEq(dao.totalCycleCount(), newTotalCycleCount, "Total cycle count should match getSystemHealth prediction");
+    }
+
+    /**
+     * @notice Test that getSystemHealth correctly predicts Big Bang scenario
+     */
+    function test_getSystemHealth_PredictsBigBangCorrectly() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // Approve first song and initialize stream
+        vm.prank(user2);
+        manager.approveRecommendation(1, FID_2);
+
+        // Submit and approve a second song to have multiple songs in queue
+        vm.warp(block.timestamp + 48 hours);
+        vm.prank(user1);
+        manager.submitRecommendation(FID_1, "newvid00001");
+
+        uint256 durationDeadline = block.timestamp + 1 hours;
+        bytes memory durationSig = generateDurationSignature("newvid00001", 100, durationDeadline, deployerPrivateKey());
+        vm.prank(deployer);
+        manager.setVideoDuration(3, 100, durationDeadline, durationSig);
+
+        vm.prank(user2);
+        manager.approveRecommendation(3, FID_2);
+        vm.prank(deployer);
+        dao.initializeStream();
+
+        // Store initial cycle count
+        uint256 initialCycleCount = dao.totalCycleCount();
+        assertEq(initialCycleCount, 0, "Initial cycle count should be 0");
+
+        // Advance time enough to cycle through all songs (180 + 100 = 280 seconds) and start a new cycle
+        // Advance 300 seconds to ensure we cycle through both songs and start playing the first song again
+        vm.warp(block.timestamp + 300 seconds);
+
+        // Get system health before updateSystem
+        (
+            uint256 timeElapsed,
+            uint256 songsProcessed,
+            uint256 bigBangsNeeded,
+            uint256 newCurrentSongId,
+            uint256 newCurrentSongIndex,
+            uint256 newTotalCycleCount
+        ) = dao.getSystemHealth();
+
+        // With 2 songs totaling 280 seconds, after 300 seconds we should have cycled through both
+        // and be playing the first song again (index 0), requiring 1 Big Bang
+        assertGe(bigBangsNeeded, 1, "Should need at least 1 Big Bang to cycle through all songs");
+
+        // Update system
+        vm.prank(user1);
+        manager.updateSystem(FID_1);
+
+        // Verify Big Bang was executed
+        assertEq(
+            dao.totalCycleCount(),
+            initialCycleCount + bigBangsNeeded,
+            "Total cycle count should increase by bigBangsNeeded"
+        );
+
+        // Verify all state variables match what getSystemHealth predicted
+        assertEq(
+            dao.currentlyPlayingId(), newCurrentSongId, "Currently playing ID should match getSystemHealth prediction"
+        );
+        assertEq(
+            dao.getCurrentSongIndex(), newCurrentSongIndex, "Current song index should match getSystemHealth prediction"
+        );
+        assertEq(dao.totalCycleCount(), newTotalCycleCount, "Total cycle count should match getSystemHealth prediction");
+    }
+
+    /**
+     * @notice Test that getSystemHealth returns early if song is still playing
+     */
+    function test_getSystemHealth_ReturnsEarlyIfSongStillPlaying() public {
+        setupUsersWithRecommendationAndReviewerTokens();
+
+        // Approve first song and initialize stream
+        vm.prank(user2);
+        manager.approveRecommendation(1, FID_2);
+        vm.prank(deployer);
+        dao.initializeStream();
+
+        // Store initial state
+        uint256 initialCurrentSongIndex = dao.getCurrentSongIndex();
+        uint256 initialCurrentlyPlayingId = dao.currentlyPlayingId();
+        uint256 initialTotalCycleCount = dao.totalCycleCount();
+
+        // Don't advance time - song should still be playing (duration is 180 seconds)
+        // Get system health
+        (
+            uint256 timeGapToFill,
+            uint256 songsProcessed,
+            uint256 bigBangsNeeded,
+            uint256 newCurrentSongId,
+            uint256 newCurrentSongIndex,
+            uint256 newTotalCycleCount
+        ) = dao.getSystemHealth();
+
+        // If song is still playing, getSystemHealth returns early with timeGapToFill = 0
+        assertEq(timeGapToFill, 0, "Time gap to fill should be 0 if song is still playing");
+        assertEq(songsProcessed, 0, "No songs should be processed if current song is still playing");
+        assertEq(bigBangsNeeded, 0, "No big bangs needed if song is still playing");
+        assertEq(
+            newCurrentSongId, initialCurrentlyPlayingId, "Current song ID should not change if song is still playing"
+        );
+        assertEq(
+            newCurrentSongIndex,
+            initialCurrentSongIndex,
+            "Current song index should not change if song is still playing"
+        );
+        assertEq(
+            newTotalCycleCount, initialTotalCycleCount, "Total cycle count should not change if song is still playing"
         );
     }
 }
