@@ -555,7 +555,7 @@ contract HumanMusicDAO is Ownable, ReentrancyGuard {
     /**
      * @dev External function so user can deposit $HUMANMUSIC tokens for rolls
      */
-    function userDepositTokens(uint256 _fid, uint256 _amount) external nonReentrant {
+    function userDepositTokens(uint256 _fid, uint256 _amount) external onlyRegisteredUser(_fid) nonReentrant {
         users[_fid].tokenBalance += _amount;
         emit TokensDeposited(_fid, _amount);
         require(humanMusicToken.transferFrom(msg.sender, address(this), _amount), "Token transfer failed");
