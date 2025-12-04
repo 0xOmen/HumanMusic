@@ -26,29 +26,16 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
  *
  * • HUMAN CURATION: Community members submit YouTube videos based on personal
  *   taste, not algorithmic manipulation
- * • TEMPORAL MECHANICS: Past/Present/Future system creates continuous flow
  * • ETERNAL CONTINUITY: Stream never stops, auto-cycles through all content
  * • GLOBAL DIVERSITY: Users from any country contribute to musical discovery
  * • ECONOMIC INCENTIVES: $HUMANMUSIC token rewards quality participation
  * • ANTI-GAMING: EIP-712 signatures prevent duration manipulation
  *
- * TEMPORAL MECHANICS SYSTEM:
- * ═══════════════════════════════════════════════════════════════════════════
- *
- * The stream operates on three temporal states:
- *
- * 1. FUTURE: Approved songs waiting to play
- * 2. PRESENT: Currently playing song (exactly one at any time)
- * 3. PAST: Songs that have finished playing
  *
  * TIME-BASED PROGRESSION:
  * ─────────────────────────
  * Each song has a `duration` (seconds) that determines how long it plays.
- * When a song's duration elapses, the system transitions:
- *
- * • Current song moves: PRESENT → PAST
- * • Next song moves: FUTURE → PRESENT
- * • Stream timing updates: New `streamStartTime` begins
+ * When a song's duration elapses, the system transitions to the next song in the queue via updateSystem().
  *
  * ETERNAL STREAM MECHANICS:
  * ═══════════════════════════════════════════════════════════════════════════
@@ -63,10 +50,10 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
  * 3. Rewards songs that have been played and increments currentSongIndex
  * 4. Rewards the caller for maintaining stream continuity
  *
- * EXAMPLE: 8-HOUR GAP SCENARIO
+ * EXAMPLE: 1-HOUR GAP SCENARIO
  * ────────────────────────────
  * • Song A was playing (180 seconds duration)
- * • 8 hours pass with no updateSystem() calls (28,800 seconds)
+ * • 1 hours pass with no updateSystem() calls
  * • Someone calls updateSystem():
  *   - Move Song A to PAST (reward submitter)
  *   - Process Song B (200s) → PAST (reward submitter)
@@ -144,10 +131,6 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
  * ──────────────────────────────
  * Backend signs video durations to prevent users from gaming the system
  * by submitting fake durations. Only verified YouTube API data is accepted.
- *
- * DAILY SUBMISSION LIMITS:
- * ───────────────────────
- * Prevents users from overwhelming the system with submissions.
  *
  * REPUTATION SYSTEM:
  * ─────────────────
